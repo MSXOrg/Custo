@@ -77,6 +77,7 @@ Configure these repository secrets before enabling the scheduled sync:
 
 - `CUSTO_BOT_CLIENT_ID`
 - `CUSTO_BOT_PRIVATE_KEY`
+- `CUSTO_ENTERPRISE_PAT` (optional, recommended for enterprise policy endpoints like enterprise rulesets/custom-properties when GitHub App enterprise permissions are unavailable)
 
 See [`AGENTS.md`](AGENTS.md) for operator runbook steps and current rollout blockers.
 

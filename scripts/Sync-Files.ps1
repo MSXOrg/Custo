@@ -129,6 +129,89 @@ function Get-FileSets {
     return $fileSets
 }
 
+function Get-AllAccessibleRepository {
+    <#
+    .SYNOPSIS
+        Lists all repositories visible to the current installation token.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [object]$Context
+    )
+
+    $allRepos = @()
+    $page = 1
+    $perPage = 100
+
+    while ($true) {
+        $response = (Invoke-GitHubAPI -Method GET -ApiEndpoint '/installation/repositories' -Body @{
+                per_page = $perPage
+                page     = $page
+            } -Context $Context).Response
+
+        if (-not $response.repositories -or $response.repositories.Count -eq 0) {
+            break
+        }
+
+        $allRepos += $response.repositories
+
+        if ($response.repositories.Count -lt $perPage) {
+            break
+        }
+
+        $page++
+    }
+
+    return $allRepos
+}
+
+function Invoke-EnterprisePolicyApi {
+    <#
+    .SYNOPSIS
+        Calls enterprise policy endpoints with PAT when available, otherwise with app context.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [ValidateSet('GET', 'POST', 'PUT', 'PATCH', 'DELETE')]
+        [string]$Method,
+
+        [Parameter(Mandatory)]
+        [string]$ApiEndpoint,
+
+        [hashtable]$Body,
+
+        [Parameter(Mandatory)]
+        [object]$Context
+    )
+
+    $enterprisePat = $env:CUSTO_ENTERPRISE_PAT
+    if (-not [string]::IsNullOrWhiteSpace($enterprisePat)) {
+        $headers = @{
+            Authorization          = "Bearer $enterprisePat"
+            Accept                 = 'application/vnd.github+json'
+            'X-GitHub-Api-Version' = '2022-11-28'
+        }
+
+        $uri = "https://api.github.com$ApiEndpoint"
+        $invokeArgs = @{
+            Method  = $Method
+            Uri     = $uri
+            Headers = $headers
+        }
+
+        if ($Body) {
+            $invokeArgs.ContentType = 'application/json'
+            $invokeArgs.Body = $Body | ConvertTo-Json -Depth 20
+        }
+
+        return Invoke-RestMethod @invokeArgs
+    }
+
+    return (Invoke-GitHubAPI -Method $Method -ApiEndpoint $ApiEndpoint -Body $Body -Context $Context).Response
+}
+
 function Sync-EnterpriseCustomPropertySchema {
     <#
     .SYNOPSIS
@@ -165,7 +248,7 @@ function Sync-EnterpriseCustomPropertySchema {
         throw 'Cannot sync custom-property schema: no file-set selections discovered in Repos/.'
     }
 
-    Invoke-GitHubAPI -Method PUT -ApiEndpoint "/enterprises/$Enterprise/properties/schema/$TypePropertyName" -Body @{
+    Invoke-EnterprisePolicyApi -Method PUT -ApiEndpoint "/enterprises/$Enterprise/properties/schema/$TypePropertyName" -Body @{
         value_type     = 'single_select'
         required       = $false
         default_value  = $null
@@ -173,7 +256,7 @@ function Sync-EnterpriseCustomPropertySchema {
         allowed_values = $typeValues
     } -Context $Context | Out-Null
 
-    Invoke-GitHubAPI -Method PUT -ApiEndpoint "/enterprises/$Enterprise/properties/schema/$SubscriptionPropertyName" -Body @{
+    Invoke-EnterprisePolicyApi -Method PUT -ApiEndpoint "/enterprises/$Enterprise/properties/schema/$SubscriptionPropertyName" -Body @{
         value_type     = 'multi_select'
         required       = $false
         default_value  = $null
@@ -257,31 +340,12 @@ function Get-SubscribingRepositoryByOrganizationFromAllAccess {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
-        [object]$Context
+        [object]$Context,
+
+        [object[]]$Repositories
     )
 
-    $allRepos = @()
-    $page = 1
-    $perPage = 100
-
-    while ($true) {
-        $response = (Invoke-GitHubAPI -Method GET -ApiEndpoint '/installation/repositories' -Body @{
-                per_page = $perPage
-                page     = $page
-            } -Context $Context).Response
-
-        if (-not $response.repositories -or $response.repositories.Count -eq 0) {
-            break
-        }
-
-        $allRepos += $response.repositories
-
-        if ($response.repositories.Count -lt $perPage) {
-            break
-        }
-
-        $page++
-    }
+    $allRepos = if ($Repositories) { $Repositories } else { Get-AllAccessibleRepository -Context $Context }
 
     $reposByOrg = @{}
 
@@ -366,6 +430,12 @@ function Invoke-PolicyEngine {
     )
 
     LogGroup '🧭 Policy engine: enterprise controls first' {
+        if (-not [string]::IsNullOrWhiteSpace($env:CUSTO_ENTERPRISE_PAT)) {
+            Write-Host 'Using CUSTO_ENTERPRISE_PAT for enterprise policy API calls'
+        } else {
+            Write-Host 'Using GitHub App token for enterprise policy API calls'
+        }
+
         if ($TargetScope.customProperties.enabled -eq $true) {
             if ($TargetScope.customProperties.scope -ne 'enterprise') {
                 throw "Unsupported customProperties.scope '$($TargetScope.customProperties.scope)'."

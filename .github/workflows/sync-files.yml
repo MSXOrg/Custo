@@ -18,6 +18,8 @@ jobs:
 
       - name: Sync managed files
         uses: PSModule/GitHub-Script@e3b0111c93df3686061cb2c65054f9216ed265e5 # main
+        env:
+          CUSTO_ENTERPRISE_PAT: ${{ secrets.CUSTO_ENTERPRISE_PAT }}
         with:
           Script: ./scripts/Sync-Files.ps1
           ClientID: ${{ secrets.CUSTO_BOT_CLIENT_ID }}
