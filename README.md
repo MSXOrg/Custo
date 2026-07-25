@@ -45,11 +45,12 @@ The [`scripts/Sync-Files.ps1`](scripts/Sync-Files.ps1) script, run by the
 
 1. Reads repository discovery scope from `config/targets.json`.
 2. Discovers file sets under `Repos/`.
-3. Syncs enterprise-level custom-property schema definitions (`Type` and `SubscribeTo`) and
+3. Applies policy controls in order: **Enterprise** first, then **Organizations and their repositories**.
+4. Syncs enterprise-level custom-property schema definitions (`Type` and `SubscribeTo`) and
    allowed values from the discovered file-set tree when `customProperties.enabled=true`.
-4. Discovers subscribing repositories from all accessible repositories (or explicit organizations
+5. Discovers subscribing repositories from all accessible repositories (or explicit organizations
    when configured) and reads their `Type` and `SubscribeTo` custom properties.
-5. Clones subscribing repositories, copies the relevant files, and opens or updates a
+6. Clones subscribing repositories, copies the relevant files, and opens or updates a
    `managed-files/update` pull request when changes are detected.
 
 ## MVP rollout scope

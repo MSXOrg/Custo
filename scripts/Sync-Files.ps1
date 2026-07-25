@@ -8,17 +8,19 @@
     This script:
     1. Authenticates as a GitHub App for repo-level operations.
     2. Discovers available file sets from the Repos/ directory structure.
-    3. Syncs custom-property schema definitions (Type/SubscribeTo) when configured.
-    4. Reads target discovery mode from config/targets.json.
-    4. Discovers subscribing repositories from either:
+    3. Reads target discovery mode from config/targets.json.
+    4. Applies policy controls in order:
+       - enterprise custom-property schema
+       - organization and repository targeting
+    5. Discovers subscribing repositories from either:
        - all repositories visible to the current installation token, or
        - explicit organizations from config.
-    5. For each subscribing repository:
+    6. For each subscribing repository:
        - Clones the repository
        - Copies managed files from the appropriate file sets
        - Detects changes using git
        - Creates or updates a pull request if changes are detected
-    6. Outputs a summary of actions taken.
+    7. Outputs a summary of actions taken.
 
 .NOTES
     Requires the GitHub PowerShell module and GitHub App authentication via GitHub-Script action.
@@ -246,11 +248,11 @@ function Get-SubscribingRepository {
     return $subscribingRepos
 }
 
-function Get-SubscribingRepositoryFromAllAccess {
+function Get-SubscribingRepositoryByOrganizationFromAllAccess {
     <#
     .SYNOPSIS
         Discovers subscribing repositories from all repositories visible to the
-        current installation token.
+        current installation token, grouped by owning organization.
     #>
     [CmdletBinding()]
     param(
@@ -281,9 +283,13 @@ function Get-SubscribingRepositoryFromAllAccess {
         $page++
     }
 
-    $subscribingRepos = @()
+    $reposByOrg = @{}
 
     foreach ($repo in $allRepos) {
+        if ($repo.owner.type -ne 'Organization') {
+            continue
+        }
+
         $owner = $repo.owner.login
         $repoName = $repo.name
 
@@ -307,7 +313,7 @@ function Get-SubscribingRepositoryFromAllAccess {
             continue
         }
 
-        $subscribingRepos += @{
+        $repoEntry = @{
             Name          = $repoName
             Owner         = $owner
             FullName      = $repo.full_name
@@ -315,16 +321,113 @@ function Get-SubscribingRepositoryFromAllAccess {
             SubscribeTo   = $subscribeTo
             DefaultBranch = $repo.default_branch
         }
+
+        if (-not $reposByOrg.ContainsKey($owner)) {
+            $reposByOrg[$owner] = @()
+        }
+
+        $reposByOrg[$owner] += $repoEntry
     }
 
-    $subscribingRepos | ForEach-Object {
-        [PSCustomObject]@{
-            Owner       = $_.Owner
-            Repo        = $_.Name
-            Type        = $_.Type
-            SubscribeTo = $_.SubscribeTo -join ', '
+    $reposByOrg.GetEnumerator() | ForEach-Object {
+        $org = $_.Key
+        $_.Value | ForEach-Object {
+            [PSCustomObject]@{
+                Owner       = $org
+                Repo        = $_.Name
+                Type        = $_.Type
+                SubscribeTo = $_.SubscribeTo -join ', '
+            }
         }
     } | Format-Table -AutoSize | Out-String
+
+    return $reposByOrg
+}
+
+function Invoke-PolicyEngine {
+    <#
+    .SYNOPSIS
+        Applies top-level policy controls before repository sync.
+    .DESCRIPTION
+        Current policy order:
+        1) Enterprise policy layer
+        2) Organization and repository synchronization
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [pscustomobject]$TargetScope,
+
+        [Parameter(Mandatory)]
+        [hashtable]$FileSets,
+
+        [Parameter(Mandatory)]
+        [object]$Context
+    )
+
+    LogGroup '🧭 Policy engine: enterprise controls first' {
+        if ($TargetScope.customProperties.enabled -eq $true) {
+            if ($TargetScope.customProperties.scope -ne 'enterprise') {
+                throw "Unsupported customProperties.scope '$($TargetScope.customProperties.scope)'."
+            }
+            if (-not $TargetScope.customProperties.enterprise) {
+                throw "customProperties.enterprise is required when customProperties.enabled is true."
+            }
+
+            $typePropertyName = if ($TargetScope.customProperties.typePropertyName) {
+                $TargetScope.customProperties.typePropertyName
+            } else {
+                'Type'
+            }
+
+            $subscriptionPropertyName = if ($TargetScope.customProperties.subscriptionPropertyName) {
+                $TargetScope.customProperties.subscriptionPropertyName
+            } else {
+                'SubscribeTo'
+            }
+
+            Sync-EnterpriseCustomPropertySchema `
+                -Enterprise $TargetScope.customProperties.enterprise `
+                -FileSets $FileSets `
+                -Context $Context `
+                -TypePropertyName $typePropertyName `
+                -SubscriptionPropertyName $subscriptionPropertyName
+        } else {
+            Write-Host 'ℹ️  customProperties sync disabled by config'
+        }
+    }
+}
+
+function Get-AllSubscribingRepository {
+    <#
+    .SYNOPSIS
+        Resolves subscribing repositories after policy has been applied.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [pscustomobject]$TargetScope,
+
+        [Parameter(Mandatory)]
+        [object]$Context
+    )
+
+    $subscribingRepos = @()
+
+    if ($TargetScope.scope -eq 'all-access') {
+        $reposByOrg = Get-SubscribingRepositoryByOrganizationFromAllAccess -Context $Context
+
+        foreach ($org in @($reposByOrg.Keys | Sort-Object)) {
+            Write-Host "Found $($reposByOrg[$org].Count) subscribing repositories in $org"
+            $subscribingRepos += $reposByOrg[$org]
+        }
+    } else {
+        foreach ($org in $TargetScope.organizations) {
+            $orgRepos = Get-SubscribingRepository -Owner $org -Context $Context
+            Write-Host "Found $($orgRepos.Count) subscribing repositories in $org"
+            $subscribingRepos += $orgRepos
+        }
+    }
 
     return $subscribingRepos
 }
@@ -532,50 +635,11 @@ try {
         }
     }
 
-    if ($targetScope.customProperties.enabled -eq $true) {
-        LogGroup '🧭 Sync custom-property schema' {
-            if ($targetScope.customProperties.scope -ne 'enterprise') {
-                throw "Unsupported customProperties.scope '$($targetScope.customProperties.scope)'."
-            }
-            if (-not $targetScope.customProperties.enterprise) {
-                throw "customProperties.enterprise is required when customProperties.enabled is true."
-            }
-
-            $typePropertyName = if ($targetScope.customProperties.typePropertyName) {
-                $targetScope.customProperties.typePropertyName
-            } else {
-                'Type'
-            }
-
-            $subscriptionPropertyName = if ($targetScope.customProperties.subscriptionPropertyName) {
-                $targetScope.customProperties.subscriptionPropertyName
-            } else {
-                'SubscribeTo'
-            }
-
-            Sync-EnterpriseCustomPropertySchema `
-                -Enterprise $targetScope.customProperties.enterprise `
-                -FileSets $fileSets `
-                -Context $context `
-                -TypePropertyName $typePropertyName `
-                -SubscriptionPropertyName $subscriptionPropertyName
-        }
-    } else {
-        Write-Host 'ℹ️  customProperties sync disabled by config'
-    }
+    Invoke-PolicyEngine -TargetScope $targetScope -FileSets $fileSets -Context $context
 
     LogGroup '🔍 Find subscribing repositories' {
-        if ($targetScope.scope -eq 'all-access') {
-            $subscribingRepos = Get-SubscribingRepositoryFromAllAccess -Context $context
-            Write-Host "Found $($subscribingRepos.Count) subscribing repositories across all accessible repositories"
-        } else {
-            $subscribingRepos = @()
-            foreach ($org in $targetScope.organizations) {
-                $orgRepos = Get-SubscribingRepository -Owner $org -Context $context
-                Write-Host "Found $($orgRepos.Count) subscribing repositories in $org"
-                $subscribingRepos += $orgRepos
-            }
-        }
+        $subscribingRepos = Get-AllSubscribingRepository -TargetScope $targetScope -Context $context
+        Write-Host "Found $($subscribingRepos.Count) subscribing repositories in total"
     }
 
     if ($subscribingRepos.Count -eq 0) {
