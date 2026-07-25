@@ -3,6 +3,7 @@
   "name": "Enterprise repo custom property policy",
   "layer": "enterprise",
   "capability": "repo-custom-property",
+  "order": 10,
   "enabled": true,
   "config": {
     "enterprise": "MSXOrg",

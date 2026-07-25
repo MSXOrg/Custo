@@ -52,8 +52,8 @@ Current default enterprise mapping (`MSXOrg`):
 - `PolicyEngine/Capabilities/repository/file-subscription-service.capability.json`
 - `PolicyEngine/Policies/MSXOrg/enterprise/repo-custom-property.policy.json`
 - `PolicyEngine/Policies/MSXOrg/enterprise/repo-rulesets.policy.json`
-- `PolicyEngine/Policies/MSXOrg/organization/none.policy.json`
-- `PolicyEngine/Policies/MSXOrg/repository/file-subscription-service.policy.json`
+- `PolicyEngine/Policies/MSXOrg/organization/_default/none.policy.json`
+- `PolicyEngine/Policies/MSXOrg/repository/_default/file-subscription-service.policy.json`
 
 Until step 1 is complete, the workflow will fail at the authentication step
 (`Connect-GitHub App`) — this is the current, expected blocker for this MVP.

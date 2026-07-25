@@ -1,8 +1,0 @@
-{
-  "version": "1.0",
-  "name": "Repository file subscription service",
-  "layer": "repository",
-  "capability": "file-subscription-service",
-  "enabled": true,
-  "config": {}
-}

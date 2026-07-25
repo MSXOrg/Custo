@@ -3,6 +3,7 @@
   "name": "Organization policy placeholder",
   "layer": "organization",
   "capability": "none",
+  "order": 10,
   "enabled": true,
   "config": {}
 }

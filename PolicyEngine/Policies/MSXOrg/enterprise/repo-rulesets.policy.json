@@ -3,6 +3,7 @@
   "name": "Enterprise repo ruleset policy",
   "layer": "enterprise",
   "capability": "repo-rulesets",
+  "order": 20,
   "enabled": true,
   "config": {
     "enterprise": "MSXOrg",

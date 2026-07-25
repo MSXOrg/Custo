@@ -44,8 +44,9 @@ Policy behavior is defined by JSON documents under [`PolicyEngine/`](PolicyEngin
 in `targets.json`. This separates **capabilities** from **policy configuration**:
 
 - `PolicyEngine/Capabilities/{layer}/*.capability.json` defines what each capability does.
-- `PolicyEngine/Policies/{enterprise}/{layer}/*.policy.json` defines how that capability is
-  configured for a specific enterprise.
+- `PolicyEngine/Policies/{enterprise}/{layer}/...` defines how that capability is configured for
+  a specific enterprise. Layer policies can be placed at `_default` plus increasingly specific
+  paths (`organization/{org}`, `repository/{org}/_default`, `repository/{org}/{repo}`).
 
 The [`scripts/Sync-Files.ps1`](scripts/Sync-Files.ps1) script, run by the
 [`Sync Managed Files`](.github/workflows/sync-files.yml) workflow:
@@ -96,6 +97,8 @@ Default enterprise policy configs live at:
 
 - `PolicyEngine/Policies/MSXOrg/enterprise/repo-custom-property.policy.json`
 - `PolicyEngine/Policies/MSXOrg/enterprise/repo-rulesets.policy.json`
+- `PolicyEngine/Policies/MSXOrg/organization/_default/none.policy.json`
+- `PolicyEngine/Policies/MSXOrg/repository/_default/file-subscription-service.policy.json`
 
 See [`AGENTS.md`](AGENTS.md) for operator runbook steps and current rollout blockers.
 

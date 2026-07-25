@@ -1,0 +1,14 @@
+{
+  "version": "1.0",
+  "name": "Repository file subscription service",
+  "layer": "repository",
+  "capability": "file-subscription-service",
+  "order": 10,
+  "enabled": true,
+  "config": {
+    "branchName": "managed-files/update",
+    "commitMessage": "chore: sync managed files",
+    "prTitle": "⚙️ [Maintenance]: Sync managed files",
+    "prLabel": "NoRelease"
+  }
+}
