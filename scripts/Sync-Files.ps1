@@ -309,7 +309,7 @@ function Sync-RepositoryFile {
                 }
 
                 # Create or update PR
-                $existingPRs = (Invoke-GitHubAPI -Method GET -Endpoint "/repos/$owner/$repoName/pulls" -Body @{
+                $existingPRs = (Invoke-GitHubAPI -Method GET -ApiEndpoint "/repos/$owner/$repoName/pulls" -Body @{
                         head  = "${owner}:${BranchName}"
                         state = 'open'
                     } -Context $Context).Response
@@ -318,7 +318,7 @@ function Sync-RepositoryFile {
                     Write-Host "✅ Updated PR #$($existingPRs[0].number) - $($existingPRs[0].html_url)"
                     $script:Summary.PRsUpdated++
                 } else {
-                    $pr = (Invoke-GitHubAPI -Method POST -Endpoint "/repos/$owner/$repoName/pulls" -Body @{
+                    $pr = (Invoke-GitHubAPI -Method POST -ApiEndpoint "/repos/$owner/$repoName/pulls" -Body @{
                             title = $PRTitle
                             head  = $BranchName
                             base  = $Repository.DefaultBranch
@@ -326,7 +326,7 @@ function Sync-RepositoryFile {
                         } -Context $Context).Response
 
                     try {
-                        Invoke-GitHubAPI -Method POST -Endpoint "/repos/$owner/$repoName/issues/$($pr.number)/labels" -Body @{
+                        Invoke-GitHubAPI -Method POST -ApiEndpoint "/repos/$owner/$repoName/issues/$($pr.number)/labels" -Body @{
                             labels = @($PRLabel)
                         } -Context $Context | Out-Null
                     } catch {
