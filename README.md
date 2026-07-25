@@ -25,7 +25,7 @@ building their own distributor from scratch.
 
 ## How it works
 
-File sets are organized by target organization, repository type, and selection:
+File sets are organized by repository type and selection:
 
 ```text
 Repos/{Type}/{Selection}/
@@ -36,9 +36,10 @@ Repos/{Type}/{Selection}/
   property. Each selection folder mirrors the root of a target repository.
 
 Target discovery scope is declared in [`config/targets.json`](config/targets.json), not hardcoded
-in the sync script. The default scope is `all-access`, which scans all repositories visible to the
-current GitHub App installation token. This keeps Custo org-agnostic and lets one runtime process
-all organizations and repositories it can access.
+in the sync script. The default scope is `all-access`, which enumerates the organizations the
+current GitHub App installation can see (`GET /app/installations`, organization accounts only) and
+then the repositories within each. User-owned repositories are not targeted. This keeps Custo
+org-agnostic and lets one runtime process every organization and repository it can access.
 
 Policy behavior is defined by JSON documents under [`PolicyEngine/`](PolicyEngine/), not embedded
 in `targets.json`. This separates **capabilities** from **policy configuration**:
@@ -100,6 +101,27 @@ Default enterprise policy configs live at:
 - `PolicyEngine/Policies/MSXOrg/enterprise/repo-rulesets.policy.json`
 - `PolicyEngine/Policies/MSXOrg/organization/_default/none.policy.json`
 - `PolicyEngine/Policies/MSXOrg/repository/_default/file-subscription-service.policy.json`
+
+### `CUSTO_ENTERPRISE_PAT` blast radius
+
+`admin:enterprise` is a high-privilege scope. Treat the PAT as a sensitive credential and reduce
+its blast radius:
+
+- Scope the workflow to a protected [environment](https://docs.github.com/actions/deployment/targeting-different-environments)
+  with required reviewers, so the PAT is only exposed on approved runs.
+- Restrict who can trigger `workflow_dispatch` and limit branches that can run the workflow.
+- Prefer a dedicated bot identity and rotate the token regularly.
+- Only enable capabilities with `authMode: enterprise-pat` when their enterprise API genuinely
+  cannot be reached by the GitHub App.
+
+## Safety and validation
+
+- Run the workflow (or `scripts/Sync-Files.ps1`) with `-WhatIf` first: every capability evaluates
+  current vs desired state and prints a diff without writing.
+- A Markdown run report (orgs/repos processed, PRs, errors) is written to the job summary.
+- `tests/` holds Pester suites for the diff, policy-loading and routing logic, plus conformance
+  checks for every capability/policy document. The [`CI`](.github/workflows/ci.yml) workflow runs
+  them with PSScriptAnalyzer on every push and pull request.
 
 See [`AGENTS.md`](AGENTS.md) for operator runbook steps and current rollout blockers.
 
