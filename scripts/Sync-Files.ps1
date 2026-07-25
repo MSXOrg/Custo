@@ -2,15 +2,16 @@
 <#
 .SYNOPSIS
     Syncs managed files from this repository to subscribing repositories across configured
-    target organizations.
+    discovery scope.
 
 .DESCRIPTION
     This script:
     1. Authenticates as a GitHub App for repo-level operations.
     2. Discovers available file sets from the Repos/ directory structure.
-    3. Reads the target organizations from config/targets.json.
-    4. For each target organization, queries repositories for their Type and SubscribeTo
-       custom properties.
+    3. Reads target discovery mode from config/targets.json.
+    4. Discovers subscribing repositories from either:
+       - all repositories visible to the current installation token, or
+       - explicit organizations from config.
     5. For each subscribing repository:
        - Clones the repository
        - Copies managed files from the appropriate file sets
@@ -20,8 +21,7 @@
 
 .NOTES
     Requires the GitHub PowerShell module and GitHub App authentication via GitHub-Script action.
-    Target organizations are configuration, not code - see config/targets.json. This keeps the
-    script usable by any MSX initiative, not just PSModule.
+    Target discovery scope is configuration, not code - see config/targets.json.
 #>
 
 [CmdletBinding()]
@@ -41,10 +41,10 @@ $script:Summary = @{
 
 #region Helper Functions
 
-function Get-TargetOrganization {
+function Get-TargetScope {
     <#
     .SYNOPSIS
-        Reads the target organization list from config/targets.json.
+        Reads repository discovery scope from config/targets.json.
     #>
     [CmdletBinding()]
     param(
@@ -58,11 +58,19 @@ function Get-TargetOrganization {
 
     $config = Get-Content -Path $ConfigPath -Raw | ConvertFrom-Json
 
-    if (-not $config.organizations -or $config.organizations.Count -eq 0) {
-        throw "No organizations configured in: $ConfigPath"
+    if (-not $config.scope) {
+        throw "Missing required 'scope' in: $ConfigPath"
     }
 
-    return @($config.organizations)
+    if ($config.scope -eq 'organizations') {
+        if (-not $config.organizations -or $config.organizations.Count -eq 0) {
+            throw "Scope 'organizations' requires a non-empty organizations list in: $ConfigPath"
+        }
+    } elseif ($config.scope -ne 'all-access') {
+        throw "Unsupported scope '$($config.scope)' in: $ConfigPath"
+    }
+
+    return $config
 }
 
 function Get-FileSets {
@@ -165,6 +173,89 @@ function Get-SubscribingRepository {
             Type          = $type
             SubscribeTo   = $subscribeTo
             DefaultBranch = $repo.DefaultBranch
+        }
+    }
+
+    $subscribingRepos | ForEach-Object {
+        [PSCustomObject]@{
+            Owner       = $_.Owner
+            Repo        = $_.Name
+            Type        = $_.Type
+            SubscribeTo = $_.SubscribeTo -join ', '
+        }
+    } | Format-Table -AutoSize | Out-String
+
+    return $subscribingRepos
+}
+
+function Get-SubscribingRepositoryFromAllAccess {
+    <#
+    .SYNOPSIS
+        Discovers subscribing repositories from all repositories visible to the
+        current installation token.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [object]$Context
+    )
+
+    $allRepos = @()
+    $page = 1
+    $perPage = 100
+
+    while ($true) {
+        $response = (Invoke-GitHubAPI -Method GET -ApiEndpoint '/installation/repositories' -Body @{
+                per_page = $perPage
+                page     = $page
+            } -Context $Context).Response
+
+        if (-not $response.repositories -or $response.repositories.Count -eq 0) {
+            break
+        }
+
+        $allRepos += $response.repositories
+
+        if ($response.repositories.Count -lt $perPage) {
+            break
+        }
+
+        $page++
+    }
+
+    $subscribingRepos = @()
+
+    foreach ($repo in $allRepos) {
+        $owner = $repo.owner.login
+        $repoName = $repo.name
+
+        $customProps = (Invoke-GitHubAPI -Method GET -ApiEndpoint "/repos/$owner/$repoName/properties/values" -Context $Context).Response
+
+        $typeProp = $customProps | Where-Object { $_.property_name -eq 'Type' }
+        $subscribeToProp = $customProps | Where-Object { $_.property_name -eq 'SubscribeTo' }
+
+        $type = $typeProp.value
+        $subscribeTo = $subscribeToProp.value
+
+        if (-not $type -or -not $subscribeTo) {
+            continue
+        }
+
+        if ($subscribeTo -is [string]) {
+            $subscribeTo = @($subscribeTo)
+        }
+
+        if ($subscribeTo.Count -eq 0) {
+            continue
+        }
+
+        $subscribingRepos += @{
+            Name          = $repoName
+            Owner         = $owner
+            FullName      = $repo.full_name
+            Type          = $type
+            SubscribeTo   = $subscribeTo
+            DefaultBranch = $repo.default_branch
         }
     }
 
@@ -373,19 +464,27 @@ try {
         exit 0
     }
 
-    LogGroup '🎯 Read target organizations' {
+    LogGroup '🎯 Read target discovery scope' {
         $targetsPath = Join-Path $PSScriptRoot '../config/targets.json'
         $targetsPath = Resolve-Path $targetsPath
-        $organizations = Get-TargetOrganization -ConfigPath $targetsPath
-        Write-Host "Target organizations: $($organizations -join ', ')"
+        $targetScope = Get-TargetScope -ConfigPath $targetsPath
+        Write-Host "Target scope: $($targetScope.scope)"
+        if ($targetScope.scope -eq 'organizations') {
+            Write-Host "Target organizations: $($targetScope.organizations -join ', ')"
+        }
     }
 
-    $subscribingRepos = @()
-    foreach ($org in $organizations) {
-        LogGroup "🔍 Find subscribing repositories in $org" {
-            $orgRepos = Get-SubscribingRepository -Owner $org -Context $context
-            Write-Host "Found $($orgRepos.Count) subscribing repositories in $org"
-            $subscribingRepos += $orgRepos
+    LogGroup '🔍 Find subscribing repositories' {
+        if ($targetScope.scope -eq 'all-access') {
+            $subscribingRepos = Get-SubscribingRepositoryFromAllAccess -Context $context
+            Write-Host "Found $($subscribingRepos.Count) subscribing repositories across all accessible repositories"
+        } else {
+            $subscribingRepos = @()
+            foreach ($org in $targetScope.organizations) {
+                $orgRepos = Get-SubscribingRepository -Owner $org -Context $context
+                Write-Host "Found $($orgRepos.Count) subscribing repositories in $org"
+                $subscribingRepos += $orgRepos
+            }
         }
     }
 

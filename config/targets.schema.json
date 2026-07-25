@@ -1,20 +1,39 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Custo target organizations",
-  "description": "Organizations that the Sync Managed Files workflow discovers subscribing repositories in.",
+  "description": "Repository discovery scope for the Sync Managed Files workflow.",
   "type": "object",
-  "required": ["organizations"],
+  "required": ["scope"],
   "properties": {
+    "scope": {
+      "type": "string",
+      "enum": ["all-access", "organizations"],
+      "description": "all-access discovers all repositories visible to the current app installation token; organizations restricts discovery to listed organizations."
+    },
     "organizations": {
       "type": "array",
-      "description": "GitHub organization logins to scan for subscribing repositories.",
+      "description": "GitHub organization logins to scan when scope is organizations.",
       "items": {
         "type": "string",
         "minLength": 1
       },
-      "minItems": 1,
       "uniqueItems": true
     }
-  },
+  }, 
+  "allOf": [
+    {
+      "if": {
+        "properties": { "scope": { "const": "organizations" } }
+      },
+      "then": {
+        "required": ["organizations"],
+        "properties": {
+          "organizations": {
+            "minItems": 1
+          }
+        }
+      }
+    }
+  ],
   "additionalProperties": false
 }

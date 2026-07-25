@@ -35,29 +35,30 @@ Repos/{Type}/{Selection}/
 - **Selection** — an individual file set repositories opt into via the `SubscribeTo` custom
   property. Each selection folder mirrors the root of a target repository.
 
-Target organizations are declared in [`config/targets.json`](config/targets.json), not hardcoded
-in the sync script. This keeps Custo org-agnostic: adding a new initiative organization is a
-config change, not a code change.
+Target discovery scope is declared in [`config/targets.json`](config/targets.json), not hardcoded
+in the sync script. The default scope is `all-access`, which scans all repositories visible to the
+current GitHub App installation token. This keeps Custo org-agnostic and lets one runtime process
+all organizations and repositories it can access.
 
 The [`scripts/Sync-Files.ps1`](scripts/Sync-Files.ps1) script, run by the
 [`Sync Managed Files`](.github/workflows/sync-files.yml) workflow:
 
-1. Reads the target organizations from `config/targets.json`.
+1. Reads repository discovery scope from `config/targets.json`.
 2. Discovers file sets under `Repos/`.
-3. For each target org, queries repositories for their `Type` and `SubscribeTo` custom
-   properties.
+3. Discovers subscribing repositories from all accessible repositories (or explicit organizations
+   when configured) and reads their `Type` and `SubscribeTo` custom properties.
 4. Clones subscribing repositories, copies the relevant files, and opens or updates a
    `managed-files/update` pull request when changes are detected.
 
 ## MVP rollout scope
 
 The first managed resource is **`AGENTS.md`** for PowerShell module repositories
-(`Repos/Module/AGENTS.md/AGENTS.md`), targeting the `PSModule` organization by default. The file
-is a thin pointer into the central docs rather than a duplicated process document, matching the
-pattern already used by [`PSModule/Template-PSModule`](https://github.com/PSModule/Template-PSModule)
-and [`PSModule/memory`](https://github.com/PSModule/memory).
+(`Repos/Module/AGENTS.md/AGENTS.md`). The file is a thin pointer into the central docs rather than
+a duplicated process document, matching the pattern already used by
+[`PSModule/Template-PSModule`](https://github.com/PSModule/Template-PSModule) and
+[`PSModule/memory`](https://github.com/PSModule/memory).
 
-Additional file sets and target organizations are added incrementally after this MVP is proven.
+Additional file sets and rollout targets are added incrementally after this MVP is proven.
 
 ## Required secrets
 

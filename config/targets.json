@@ -1,6 +1,4 @@
 {
   "$schema": "./targets.schema.json",
-  "organizations": [
-    "PSModule"
-  ]
+  "scope": "all-access"
 }
