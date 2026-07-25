@@ -8,7 +8,7 @@
     1. Authenticate as GitHub App for repository-level operations.
     2. Discover managed file sets from Repos/.
     3. Read discovery scope from config/targets.json.
-    4. Load policy documents from Policies/*.policy.json.
+    4. Load capability and policy documents from PolicyEngine/.
     5. Apply policies in order:
        - Enterprise layer
        - Organization layer
@@ -61,21 +61,71 @@ function Get-TargetScope {
         throw "Unsupported scope '$($config.scope)' in: $ConfigPath"
     }
 
+    if ($config.policy) {
+        if (-not $config.policy.enterprise) {
+            throw "Config policy section requires 'enterprise'."
+        }
+    }
+
     return $config
+}
+
+function Get-CapabilityCatalog {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$CapabilityPath
+    )
+
+    if (-not (Test-Path $CapabilityPath)) {
+        throw "Capability path not found at: $CapabilityPath"
+    }
+
+    $capabilityFiles = Get-ChildItem -Path $CapabilityPath -File -Recurse -Filter '*.capability.json' | Sort-Object FullName
+    if ($capabilityFiles.Count -eq 0) {
+        throw "No capability documents found in: $CapabilityPath"
+    }
+
+    $catalog = @{}
+    foreach ($capabilityFile in $capabilityFiles) {
+        $doc = Get-Content -Path $capabilityFile.FullName -Raw | ConvertFrom-Json -AsHashtable
+
+        if (-not $doc.layer -or -not $doc.capability) {
+            throw "Capability '$($capabilityFile.Name)' must define both layer and capability."
+        }
+
+        $layer = $doc.layer.ToLowerInvariant()
+        $capability = $doc.capability.ToLowerInvariant()
+        $key = "$layer.$capability"
+
+        if ($catalog.ContainsKey($key)) {
+            throw "Duplicate capability definition for '$key': $($capabilityFile.FullName)"
+        }
+
+        $doc.layer = $layer
+        $doc.capability = $capability
+        $doc.sourceFile = $capabilityFile.FullName
+        $catalog[$key] = $doc
+    }
+
+    return $catalog
 }
 
 function Get-PolicyDocuments {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
-        [string]$PolicyPath
+        [string]$PolicyPath,
+
+        [Parameter(Mandatory)]
+        [hashtable]$CapabilityCatalog
     )
 
     if (-not (Test-Path $PolicyPath)) {
         throw "Policy path not found at: $PolicyPath"
     }
 
-    $policyFiles = Get-ChildItem -Path $PolicyPath -File -Filter '*.policy.json' | Sort-Object Name
+    $policyFiles = Get-ChildItem -Path $PolicyPath -File -Recurse -Filter '*.policy.json' | Sort-Object FullName
     if ($policyFiles.Count -eq 0) {
         throw "No policy documents found in: $PolicyPath"
     }
@@ -106,6 +156,11 @@ function Get-PolicyDocuments {
 
         if (-not $layerOrder.ContainsKey($doc.layer)) {
             throw "Policy '$($policyFile.Name)' has unsupported layer '$($doc.layer)'."
+        }
+
+        $capabilityKey = "$($doc.layer).$($doc.capability)"
+        if (-not $CapabilityCatalog.ContainsKey($capabilityKey)) {
+            throw "Policy '$($policyFile.Name)' references unsupported capability '$capabilityKey'."
         }
 
         $documents += $doc
@@ -719,13 +774,19 @@ try {
     }
 
     LogGroup '📜 Load policy documents' {
-        $policyPath = if ($targetScope.policyPath) { $targetScope.policyPath } else { '../Policies' }
-        if (-not [System.IO.Path]::IsPathRooted($policyPath)) {
-            $policyPath = Join-Path $PSScriptRoot $policyPath
+        $policyRoot = if ($targetScope.policy.rootPath) { $targetScope.policy.rootPath } else { '../PolicyEngine' }
+        if (-not [System.IO.Path]::IsPathRooted($policyRoot)) {
+            $policyRoot = Join-Path $PSScriptRoot $policyRoot
         }
-        $policyPath = Resolve-Path $policyPath
-        $policies = Get-PolicyDocuments -PolicyPath $policyPath
-        Write-Host "Loaded $($policies.Count) policy documents from $policyPath"
+        $policyRoot = Resolve-Path $policyRoot
+
+        $policyEnterprise = if ($targetScope.policy.enterprise) { $targetScope.policy.enterprise } else { 'default' }
+        $capabilityPath = Join-Path $policyRoot 'Capabilities'
+        $policyPath = Join-Path (Join-Path $policyRoot 'Policies') $policyEnterprise
+
+        $capabilityCatalog = Get-CapabilityCatalog -CapabilityPath (Resolve-Path $capabilityPath)
+        $policies = Get-PolicyDocuments -PolicyPath (Resolve-Path $policyPath) -CapabilityCatalog $capabilityCatalog
+        Write-Host "Loaded $($policies.Count) policy documents for enterprise '$policyEnterprise'"
     }
 
     LogGroup '🧭 Execute policy engine' {

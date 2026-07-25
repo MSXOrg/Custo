@@ -1,0 +1,8 @@
+{
+  "version": "1.0",
+  "name": "Enterprise repository rulesets",
+  "layer": "enterprise",
+  "capability": "repo-rulesets",
+  "authPreference": "github-app-first-fallback-enterprise-pat",
+  "description": "Maintains enterprise-level repository rulesets."
+}

@@ -1,0 +1,8 @@
+{
+  "version": "1.0",
+  "name": "Organization policy placeholder",
+  "layer": "organization",
+  "capability": "none",
+  "authPreference": "github-app",
+  "description": "Placeholder capability for future organization-level policies."
+}

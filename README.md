@@ -40,16 +40,19 @@ in the sync script. The default scope is `all-access`, which scans all repositor
 current GitHub App installation token. This keeps Custo org-agnostic and lets one runtime process
 all organizations and repositories it can access.
 
-Policy behavior is defined by JSON documents under [`Policies/`](Policies/), not embedded in
-`targets.json`. This separates **capabilities** (what policy layers can do) from **policy
-configuration** (which policies are enabled and with what settings).
+Policy behavior is defined by JSON documents under [`PolicyEngine/`](PolicyEngine/), not embedded
+in `targets.json`. This separates **capabilities** from **policy configuration**:
+
+- `PolicyEngine/Capabilities/{layer}/*.capability.json` defines what each capability does.
+- `PolicyEngine/Policies/{enterprise}/{layer}/*.policy.json` defines how that capability is
+  configured for a specific enterprise.
 
 The [`scripts/Sync-Files.ps1`](scripts/Sync-Files.ps1) script, run by the
 [`Sync Managed Files`](.github/workflows/sync-files.yml) workflow:
 
 1. Reads repository discovery scope from `config/targets.json`.
 2. Discovers file sets under `Repos/`.
-3. Loads policy documents from `Policies/*.policy.json`.
+3. Loads capability and policy documents from `PolicyEngine/`.
 4. Applies policy controls in order: **Enterprise** first, then **Organization**, then **Repository**.
 5. Runs enterprise policy capabilities such as:
    - `repo-custom-property` (maintain `Type` and `SubscribeTo` enterprise property definitions)

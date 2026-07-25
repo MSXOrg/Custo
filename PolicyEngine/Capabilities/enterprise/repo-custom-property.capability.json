@@ -1,0 +1,8 @@
+{
+  "version": "1.0",
+  "name": "Enterprise repository custom-property schema",
+  "layer": "enterprise",
+  "capability": "repo-custom-property",
+  "authPreference": "github-app-first-fallback-enterprise-pat",
+  "description": "Maintains enterprise-level repository custom-property definitions and allowed values."
+}

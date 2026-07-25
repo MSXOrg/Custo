@@ -1,5 +1,8 @@
 {
   "$schema": "./targets.schema.json",
   "scope": "all-access",
-  "policyPath": "../Policies"
+  "policy": {
+    "rootPath": "../PolicyEngine",
+    "enterprise": "MSXOrg"
+  }
 }
