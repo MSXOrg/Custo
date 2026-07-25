@@ -26,6 +26,8 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $script:Summary = @{
+    OrgsProcessed       = 0
+    OrgsFailed          = 0
     TotalReposProcessed = 0
     PRsCreated          = 0
     PRsUpdated          = 0
@@ -361,6 +363,52 @@ function Write-ConfigDiff {
         Write-Host "   $($line.SideIndicator) $($line.InputObject)"
     }
     return $true
+}
+
+function Write-RunReport {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute(
+        'PSAvoidUsingWriteHost', '', Scope = 'Function',
+        Justification = 'Intended for logging in GitHub Actions runners.'
+    )]
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [hashtable]$Summary,
+
+        [switch]$WhatIf
+    )
+
+    $mode = if ($WhatIf) { 'plan (WhatIf — no writes)' } else { 'apply' }
+    $lines = @(
+        "## Custo sync report — $mode",
+        '',
+        '| Metric | Count |',
+        '| --- | --- |',
+        "| Orgs processed | $($Summary.OrgsProcessed) |",
+        "| Orgs failed | $($Summary.OrgsFailed) |",
+        "| Repos processed | $($Summary.TotalReposProcessed) |",
+        "| PRs created | $($Summary.PRsCreated) |",
+        "| PRs updated | $($Summary.PRsUpdated) |",
+        "| Already in sync | $($Summary.ReposAlreadyInSync) |",
+        "| Repos skipped | $($Summary.ReposSkipped) |",
+        "| Errors | $($Summary.Errors.Count) |"
+    )
+
+    if ($Summary.Errors.Count -gt 0) {
+        $lines += ''
+        $lines += '### Errors'
+        foreach ($err in $Summary.Errors) {
+            $lines += "- $err"
+        }
+    }
+
+    $report = $lines -join "`n"
+
+    if ($env:GITHUB_STEP_SUMMARY) {
+        $report | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+    } else {
+        Write-Host $report
+    }
 }
 
 function Invoke-EnterprisePolicyApi {
@@ -956,11 +1004,16 @@ try {
 
     try {
         LogGroup '🏢 Enterprise layer' {
-            $enterprisePolicyPaths = Resolve-PolicyLayerPaths -PolicyRoot $policyRoot -Enterprise $policyEnterprise -Layer 'enterprise'
-            $enterprisePolicies = Get-PolicyDocumentsFromPaths -Paths $enterprisePolicyPaths -CapabilityCatalog $capabilityCatalog -Layer 'enterprise'
-            Write-Host "Enterprise policies loaded: $($enterprisePolicies.Count)"
+            try {
+                $enterprisePolicyPaths = Resolve-PolicyLayerPaths -PolicyRoot $policyRoot -Enterprise $policyEnterprise -Layer 'enterprise'
+                $enterprisePolicies = Get-PolicyDocumentsFromPaths -Paths $enterprisePolicyPaths -CapabilityCatalog $capabilityCatalog -Layer 'enterprise'
+                Write-Host "Enterprise policies loaded: $($enterprisePolicies.Count)"
 
-            Invoke-PoliciesForScope -Policies $enterprisePolicies -FileSets $fileSets -CapabilityCatalog $capabilityCatalog -Context $rootContext -Enterprise $policyEnterprise -TempPath $tempPath -WhatIf:$WhatIf
+                Invoke-PoliciesForScope -Policies $enterprisePolicies -FileSets $fileSets -CapabilityCatalog $capabilityCatalog -Context $rootContext -Enterprise $policyEnterprise -TempPath $tempPath -WhatIf:$WhatIf
+            } catch {
+                Write-Host "❌ Enterprise layer failed: $_"
+                $script:Summary.Errors += "enterprise:$policyEnterprise : $_"
+            }
         }
 
         LogGroup '🏢➡️🏬 Organization and repository layers' {
@@ -968,29 +1021,38 @@ try {
             Write-Host "Organizations discovered: $($organizations -join ', ')"
 
             foreach ($org in $organizations) {
-                LogGroup "🔐 Connect org installation: $org" {
-                    $orgContext = Get-OrganizationContext -Organization $org
-                }
-
-                LogGroup "🏬 Organization policies: $org" {
-                    $orgPolicyPaths = Resolve-PolicyLayerPaths -PolicyRoot $policyRoot -Enterprise $policyEnterprise -Layer 'organization' -Organization $org
-                    $orgPolicies = Get-PolicyDocumentsFromPaths -Paths $orgPolicyPaths -CapabilityCatalog $capabilityCatalog -Layer 'organization'
-                    Write-Host "Organization policies loaded: $($orgPolicies.Count)"
-                    Invoke-PoliciesForScope -Policies $orgPolicies -FileSets $fileSets -CapabilityCatalog $capabilityCatalog -Context $orgContext -Enterprise $policyEnterprise -Organization $org -TempPath $tempPath -WhatIf:$WhatIf
-                }
-
-                LogGroup "📦 Repositories in $org" {
-                    $repos = Get-RepositoriesForOrganization -Organization $org -Context $orgContext
-                    Write-Host "Repositories discovered in ${org}: $($repos.Count)"
-                }
-
-                foreach ($repo in $repos) {
-                    LogGroup "🏷️ Repository policies: $($repo.FullName)" {
-                        $repoPolicyPaths = Resolve-PolicyLayerPaths -PolicyRoot $policyRoot -Enterprise $policyEnterprise -Layer 'repository' -Organization $org -Repository $repo.Name
-                        $repoPolicies = Get-PolicyDocumentsFromPaths -Paths $repoPolicyPaths -CapabilityCatalog $capabilityCatalog -Layer 'repository'
-                        Write-Host "Repository policies loaded: $($repoPolicies.Count)"
-                        Invoke-PoliciesForScope -Policies $repoPolicies -FileSets $fileSets -CapabilityCatalog $capabilityCatalog -Context $orgContext -Enterprise $policyEnterprise -Organization $org -Repository $repo -TempPath $tempPath -WhatIf:$WhatIf
+                try {
+                    $orgContext = $null
+                    LogGroup "🔐 Connect org installation: $org" {
+                        $orgContext = Get-OrganizationContext -Organization $org
                     }
+
+                    LogGroup "🏬 Organization policies: $org" {
+                        $orgPolicyPaths = Resolve-PolicyLayerPaths -PolicyRoot $policyRoot -Enterprise $policyEnterprise -Layer 'organization' -Organization $org
+                        $orgPolicies = Get-PolicyDocumentsFromPaths -Paths $orgPolicyPaths -CapabilityCatalog $capabilityCatalog -Layer 'organization'
+                        Write-Host "Organization policies loaded: $($orgPolicies.Count)"
+                        Invoke-PoliciesForScope -Policies $orgPolicies -FileSets $fileSets -CapabilityCatalog $capabilityCatalog -Context $orgContext -Enterprise $policyEnterprise -Organization $org -TempPath $tempPath -WhatIf:$WhatIf
+                    }
+
+                    LogGroup "📦 Repositories in $org" {
+                        $repos = Get-RepositoriesForOrganization -Organization $org -Context $orgContext
+                        Write-Host "Repositories discovered in ${org}: $($repos.Count)"
+                    }
+
+                    foreach ($repo in $repos) {
+                        LogGroup "🏷️ Repository policies: $($repo.FullName)" {
+                            $repoPolicyPaths = Resolve-PolicyLayerPaths -PolicyRoot $policyRoot -Enterprise $policyEnterprise -Layer 'repository' -Organization $org -Repository $repo.Name
+                            $repoPolicies = Get-PolicyDocumentsFromPaths -Paths $repoPolicyPaths -CapabilityCatalog $capabilityCatalog -Layer 'repository'
+                            Write-Host "Repository policies loaded: $($repoPolicies.Count)"
+                            Invoke-PoliciesForScope -Policies $repoPolicies -FileSets $fileSets -CapabilityCatalog $capabilityCatalog -Context $orgContext -Enterprise $policyEnterprise -Organization $org -Repository $repo -TempPath $tempPath -WhatIf:$WhatIf
+                        }
+                    }
+
+                    $script:Summary.OrgsProcessed++
+                } catch {
+                    Write-Host "❌ Organization '$org' failed: $_"
+                    $script:Summary.Errors += "org:$org : $_"
+                    $script:Summary.OrgsFailed++
                 }
             }
         }
@@ -1000,8 +1062,12 @@ try {
         }
     }
 
+    Write-RunReport -Summary $script:Summary -WhatIf:$WhatIf
+
     Write-Host ''
     Write-Host '📊 Summary'
+    Write-Host "   Orgs OK:   $($script:Summary.OrgsProcessed)"
+    Write-Host "   Orgs fail: $($script:Summary.OrgsFailed)"
     Write-Host "   Processed: $($script:Summary.TotalReposProcessed)"
     Write-Host "   Created:   $($script:Summary.PRsCreated)"
     Write-Host "   Updated:   $($script:Summary.PRsUpdated)"
