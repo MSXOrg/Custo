@@ -24,12 +24,15 @@ cannot run against real repositories until an operator completes these steps:
    (app id `1320343`, slug `psmodule-s-custo`) already installed on the `PSModule` organization.
    If that app's credentials are not available, generate a new private key for it or provision an
    equivalent app with `contents:write`, `pull_requests:write`, and
-   `repository_custom_properties:read` on target repositories.
+   `repository_custom_properties:read` on target repositories, plus enterprise custom-properties
+   write/admin permission if enterprise schema sync is enabled.
 2. **Confirm app installation scope.** Verify the app is installed on the `PSModule` organization
    with access to the module repositories that should receive `AGENTS.md`
    (`gh api orgs/PSModule/installations`).
 3. **Set custom properties on target repositories.** Each subscribing module repository needs
    `Type = Module` and `SubscribeTo` including `AGENTS.md` set at the repository level.
+   Custo now maintains allowed values at enterprise level from `Repos/` file sets when
+   `customProperties.enabled=true` in `config/targets.json`.
 4. **Dry-run via `workflow_dispatch`.** Trigger the `Sync Managed Files` workflow manually first
    and review the summary before relying on the daily schedule.
 

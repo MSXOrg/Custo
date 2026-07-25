@@ -8,7 +8,8 @@
     This script:
     1. Authenticates as a GitHub App for repo-level operations.
     2. Discovers available file sets from the Repos/ directory structure.
-    3. Reads target discovery mode from config/targets.json.
+    3. Syncs custom-property schema definitions (Type/SubscribeTo) when configured.
+    4. Reads target discovery mode from config/targets.json.
     4. Discovers subscribing repositories from either:
        - all repositories visible to the current installation token, or
        - explicit organizations from config.
@@ -124,6 +125,63 @@ function Get-FileSets {
     $fileSetTable | Format-Table -AutoSize | Out-String
 
     return $fileSets
+}
+
+function Sync-EnterpriseCustomPropertySchema {
+    <#
+    .SYNOPSIS
+        Ensures enterprise-level custom property definitions exist with allowed values
+        derived from the Repos/ file-set tree.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$Enterprise,
+
+        [Parameter(Mandatory)]
+        [hashtable]$FileSets,
+
+        [Parameter(Mandatory)]
+        [object]$Context,
+
+        [string]$TypePropertyName = 'Type',
+        [string]$SubscriptionPropertyName = 'SubscribeTo'
+    )
+
+    $typeValues = @($FileSets.Keys | Sort-Object -Unique)
+    if ($typeValues.Count -eq 0) {
+        throw 'Cannot sync custom-property schema: no repository types discovered in Repos/.'
+    }
+
+    $subscriptionValues = @(
+        $FileSets.Values |
+            ForEach-Object { $_.Keys } |
+            Sort-Object -Unique
+    )
+
+    if ($subscriptionValues.Count -eq 0) {
+        throw 'Cannot sync custom-property schema: no file-set selections discovered in Repos/.'
+    }
+
+    Invoke-GitHubAPI -Method PUT -ApiEndpoint "/enterprises/$Enterprise/properties/schema/$TypePropertyName" -Body @{
+        value_type     = 'single_select'
+        required       = $false
+        default_value  = $null
+        description    = 'Repository type used by Custo managed-file distribution.'
+        allowed_values = $typeValues
+    } -Context $Context | Out-Null
+
+    Invoke-GitHubAPI -Method PUT -ApiEndpoint "/enterprises/$Enterprise/properties/schema/$SubscriptionPropertyName" -Body @{
+        value_type     = 'multi_select'
+        required       = $false
+        default_value  = $null
+        description    = 'Managed file sets the repository subscribes to from Custo.'
+        allowed_values = $subscriptionValues
+    } -Context $Context | Out-Null
+
+    Write-Host "✅ Synced enterprise custom-property schema on '$Enterprise'"
+    Write-Host "   - ${TypePropertyName}: $($typeValues -join ', ')"
+    Write-Host "   - ${SubscriptionPropertyName}: $($subscriptionValues -join ', ')"
 }
 
 function Get-SubscribingRepository {
@@ -472,6 +530,38 @@ try {
         if ($targetScope.scope -eq 'organizations') {
             Write-Host "Target organizations: $($targetScope.organizations -join ', ')"
         }
+    }
+
+    if ($targetScope.customProperties.enabled -eq $true) {
+        LogGroup '🧭 Sync custom-property schema' {
+            if ($targetScope.customProperties.scope -ne 'enterprise') {
+                throw "Unsupported customProperties.scope '$($targetScope.customProperties.scope)'."
+            }
+            if (-not $targetScope.customProperties.enterprise) {
+                throw "customProperties.enterprise is required when customProperties.enabled is true."
+            }
+
+            $typePropertyName = if ($targetScope.customProperties.typePropertyName) {
+                $targetScope.customProperties.typePropertyName
+            } else {
+                'Type'
+            }
+
+            $subscriptionPropertyName = if ($targetScope.customProperties.subscriptionPropertyName) {
+                $targetScope.customProperties.subscriptionPropertyName
+            } else {
+                'SubscribeTo'
+            }
+
+            Sync-EnterpriseCustomPropertySchema `
+                -Enterprise $targetScope.customProperties.enterprise `
+                -FileSets $fileSets `
+                -Context $context `
+                -TypePropertyName $typePropertyName `
+                -SubscriptionPropertyName $subscriptionPropertyName
+        }
+    } else {
+        Write-Host 'ℹ️  customProperties sync disabled by config'
     }
 
     LogGroup '🔍 Find subscribing repositories' {

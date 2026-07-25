@@ -45,9 +45,11 @@ The [`scripts/Sync-Files.ps1`](scripts/Sync-Files.ps1) script, run by the
 
 1. Reads repository discovery scope from `config/targets.json`.
 2. Discovers file sets under `Repos/`.
-3. Discovers subscribing repositories from all accessible repositories (or explicit organizations
+3. Syncs enterprise-level custom-property schema definitions (`Type` and `SubscribeTo`) and
+   allowed values from the discovered file-set tree when `customProperties.enabled=true`.
+4. Discovers subscribing repositories from all accessible repositories (or explicit organizations
    when configured) and reads their `Type` and `SubscribeTo` custom properties.
-4. Clones subscribing repositories, copies the relevant files, and opens or updates a
+5. Clones subscribing repositories, copies the relevant files, and opens or updates a
    `managed-files/update` pull request when changes are detected.
 
 ## MVP rollout scope
@@ -62,9 +64,15 @@ Additional file sets and rollout targets are added incrementally after this MVP 
 
 ## Required secrets
 
-The sync workflow authenticates as a GitHub App with `contents`, `pull_requests`, and
-`repository_custom_properties` access on target repositories. Configure these repository secrets
-before enabling the scheduled sync:
+The sync workflow authenticates as a GitHub App. For repository sync plus enterprise custom
+property maintenance, the app needs:
+
+- `contents:write`
+- `pull_requests:write`
+- `repository_custom_properties:read`
+- enterprise custom-properties write/admin access (for `/enterprises/{enterprise}/properties/schema`)
+
+Configure these repository secrets before enabling the scheduled sync:
 
 - `CUSTO_BOT_CLIENT_ID`
 - `CUSTO_BOT_PRIVATE_KEY`

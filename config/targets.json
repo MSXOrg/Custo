@@ -1,4 +1,11 @@
 {
   "$schema": "./targets.schema.json",
-  "scope": "all-access"
+  "scope": "all-access",
+  "customProperties": {
+    "enabled": true,
+    "scope": "enterprise",
+    "enterprise": "MSXOrg",
+    "typePropertyName": "Type",
+    "subscriptionPropertyName": "SubscribeTo"
+  }
 }

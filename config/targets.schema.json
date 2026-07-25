@@ -18,6 +18,39 @@
         "minLength": 1
       },
       "uniqueItems": true
+    },
+    "customProperties": {
+      "type": "object",
+      "description": "Controls automatic custom-property schema synchronization.",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "When true, Custo synchronizes custom-property definitions before repository sync.",
+          "default": false
+        },
+        "scope": {
+          "type": "string",
+          "enum": ["enterprise"],
+          "description": "Where to maintain custom-property schema definitions."
+        },
+        "enterprise": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Enterprise slug used for enterprise-level custom-property schema."
+        },
+        "typePropertyName": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Custom-property name for repository type. Defaults to Type."
+        },
+        "subscriptionPropertyName": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Custom-property name for subscribed file sets. Defaults to SubscribeTo."
+        }
+      },
+      "required": ["enabled"],
+      "additionalProperties": false
     }
   }, 
   "allOf": [
@@ -30,6 +63,26 @@
         "properties": {
           "organizations": {
             "minItems": 1
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "customProperties": {
+            "properties": { "enabled": { "const": true } },
+            "required": ["enabled"]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "customProperties": {
+            "required": ["scope", "enterprise"],
+            "properties": {
+              "scope": { "const": "enterprise" }
+            }
           }
         }
       }
