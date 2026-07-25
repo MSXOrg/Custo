@@ -568,8 +568,16 @@ function Sync-EnterpriseCustomPropertySchema {
 
     $currentType = $null
     $currentSubscription = $null
-    try { $currentType = Invoke-EnterprisePolicyApi -Method GET -ApiEndpoint "/enterprises/$Enterprise/properties/schema/$TypePropertyName" -AuthMode $AuthMode -Context $Context } catch {}
-    try { $currentSubscription = Invoke-EnterprisePolicyApi -Method GET -ApiEndpoint "/enterprises/$Enterprise/properties/schema/$SubscriptionPropertyName" -AuthMode $AuthMode -Context $Context } catch {}
+    try {
+        $currentType = Invoke-EnterprisePolicyApi -Method GET -ApiEndpoint "/enterprises/$Enterprise/properties/schema/$TypePropertyName" -AuthMode $AuthMode -Context $Context
+    } catch {
+        Write-Host "ℹ️  Could not read current '$TypePropertyName' definition (treating as absent): $_"
+    }
+    try {
+        $currentSubscription = Invoke-EnterprisePolicyApi -Method GET -ApiEndpoint "/enterprises/$Enterprise/properties/schema/$SubscriptionPropertyName" -AuthMode $AuthMode -Context $Context
+    } catch {
+        Write-Host "ℹ️  Could not read current '$SubscriptionPropertyName' definition (treating as absent): $_"
+    }
 
     $typeChanged = Write-ConfigDiff -Title "enterprise property '$TypePropertyName'" -Current $currentType -Desired $desiredType
     $subscriptionChanged = Write-ConfigDiff -Title "enterprise property '$SubscriptionPropertyName'" -Current $currentSubscription -Desired $desiredSubscription

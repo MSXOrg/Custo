@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://msxorg.github.io/custo/schemas/policy.schema.json",
+  "title": "Custo policy document",
+  "description": "Configures a capability for a specific enterprise/layer. Placed under PolicyEngine/Policies/{enterprise}/{layer}/...",
+  "type": "object",
+  "required": ["version", "name", "layer", "capability", "enabled"],
+  "properties": {
+    "version": {
+      "type": "string",
+      "description": "Document schema version."
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Human-readable policy name."
+    },
+    "layer": {
+      "type": "string",
+      "enum": ["enterprise", "organization", "repository"],
+      "description": "Policy layer. Must match the capability's layer and the folder it lives in."
+    },
+    "capability": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+      "description": "Capability this policy configures. Must exist in the capability catalog for this layer."
+    },
+    "order": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Execution order within the layer (ascending). Defaults to 1000 when omitted."
+    },
+    "enabled": {
+      "type": "boolean",
+      "description": "Whether this policy is applied. Disabled policies are loaded and skipped."
+    },
+    "config": {
+      "type": "object",
+      "description": "Capability-specific configuration payload."
+    }
+  },
+  "additionalProperties": true
+}

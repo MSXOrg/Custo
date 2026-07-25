@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://msxorg.github.io/custo/schemas/capability.schema.json",
+  "title": "Custo capability document",
+  "description": "Defines what a policy capability does and how it authenticates. One document per Layer.Capability.",
+  "type": "object",
+  "required": ["version", "name", "layer", "capability", "authMode"],
+  "properties": {
+    "version": {
+      "type": "string",
+      "description": "Document schema version."
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Human-readable capability name."
+    },
+    "layer": {
+      "type": "string",
+      "enum": ["enterprise", "organization", "repository"],
+      "description": "Policy layer this capability runs at."
+    },
+    "capability": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+      "description": "Capability identifier (kebab-case) unique within its layer."
+    },
+    "authMode": {
+      "type": "string",
+      "enum": ["github-app", "enterprise-pat"],
+      "description": "Explicit authentication mode. github-app uses the installation token; enterprise-pat uses CUSTO_ENTERPRISE_PAT for enterprise-admin endpoints the app cannot reach."
+    },
+    "description": {
+      "type": "string"
+    },
+    "configSchema": {
+      "type": "object",
+      "description": "Optional inline description of the config object accepted by matching policy documents."
+    }
+  },
+  "additionalProperties": true
+}
