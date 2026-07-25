@@ -1,0 +1,8 @@
+{
+  "version": "1.0",
+  "name": "Organization policy placeholder",
+  "layer": "organization",
+  "capability": "none",
+  "enabled": true,
+  "config": {}
+}

@@ -40,17 +40,24 @@ in the sync script. The default scope is `all-access`, which scans all repositor
 current GitHub App installation token. This keeps Custo org-agnostic and lets one runtime process
 all organizations and repositories it can access.
 
+Policy behavior is defined by JSON documents under [`Policies/`](Policies/), not embedded in
+`targets.json`. This separates **capabilities** (what policy layers can do) from **policy
+configuration** (which policies are enabled and with what settings).
+
 The [`scripts/Sync-Files.ps1`](scripts/Sync-Files.ps1) script, run by the
 [`Sync Managed Files`](.github/workflows/sync-files.yml) workflow:
 
 1. Reads repository discovery scope from `config/targets.json`.
 2. Discovers file sets under `Repos/`.
-3. Applies policy controls in order: **Enterprise** first, then **Organizations and their repositories**.
-4. Syncs enterprise-level custom-property schema definitions (`Type` and `SubscribeTo`) and
-   allowed values from the discovered file-set tree when `customProperties.enabled=true`.
-5. Discovers subscribing repositories from all accessible repositories (or explicit organizations
+3. Loads policy documents from `Policies/*.policy.json`.
+4. Applies policy controls in order: **Enterprise** first, then **Organization**, then **Repository**.
+5. Runs enterprise policy capabilities such as:
+   - `repo-custom-property` (maintain `Type` and `SubscribeTo` enterprise property definitions)
+   - `repo-rulesets` (maintain enterprise repository rulesets)
+6. Discovers subscribing repositories from all accessible repositories (or explicit organizations
    when configured) and reads their `Type` and `SubscribeTo` custom properties.
-6. Clones subscribing repositories, copies the relevant files, and opens or updates a
+7. Executes repository capability `file-subscription-service`, cloning repositories, syncing files,
+   and opening/updating
    `managed-files/update` pull request when changes are detected.
 
 ## MVP rollout scope
@@ -65,8 +72,11 @@ Additional file sets and rollout targets are added incrementally after this MVP 
 
 ## Required secrets
 
-The sync workflow authenticates as a GitHub App. For repository sync plus enterprise custom
-property maintenance, the app needs:
+The sync workflow authenticates as a GitHub App. Enterprise policy API calls are attempted with
+the GitHub App token first; when those calls are unavailable for GitHub Apps, Custo falls back to
+`CUSTO_ENTERPRISE_PAT` if present.
+
+For repository sync plus enterprise policy maintenance, configure:
 
 - `contents:write`
 - `pull_requests:write`
@@ -77,7 +87,7 @@ Configure these repository secrets before enabling the scheduled sync:
 
 - `CUSTO_BOT_CLIENT_ID`
 - `CUSTO_BOT_PRIVATE_KEY`
-- `CUSTO_ENTERPRISE_PAT` (optional, recommended for enterprise policy endpoints like enterprise rulesets/custom-properties when GitHub App enterprise permissions are unavailable)
+- `CUSTO_ENTERPRISE_PAT` (optional fallback PAT for enterprise policy endpoints, e.g. enterprise rulesets, with `admin:enterprise`)
 
 See [`AGENTS.md`](AGENTS.md) for operator runbook steps and current rollout blockers.
 

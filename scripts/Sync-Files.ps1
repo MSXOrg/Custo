@@ -1,30 +1,23 @@
 #!/usr/bin/env pwsh
 <#
 .SYNOPSIS
-    Syncs managed files from this repository to subscribing repositories across configured
-    discovery scope.
+    Syncs managed files from this repository to subscribing repositories.
 
 .DESCRIPTION
-    This script:
-    1. Authenticates as a GitHub App for repo-level operations.
-    2. Discovers available file sets from the Repos/ directory structure.
-    3. Reads target discovery mode from config/targets.json.
-    4. Applies policy controls in order:
-       - enterprise custom-property schema
-       - organization and repository targeting
-    5. Discovers subscribing repositories from either:
-       - all repositories visible to the current installation token, or
-       - explicit organizations from config.
-    6. For each subscribing repository:
-       - Clones the repository
-       - Copies managed files from the appropriate file sets
-       - Detects changes using git
-       - Creates or updates a pull request if changes are detected
-    7. Outputs a summary of actions taken.
+    This script runs a layered policy engine and then performs repository file sync:
+    1. Authenticate as GitHub App for repository-level operations.
+    2. Discover managed file sets from Repos/.
+    3. Read discovery scope from config/targets.json.
+    4. Load policy documents from Policies/*.policy.json.
+    5. Apply policies in order:
+       - Enterprise layer
+       - Organization layer
+       - Repository layer
+    6. If repository file-subscription policy is enabled, sync files to subscribing repositories.
 
 .NOTES
-    Requires the GitHub PowerShell module and GitHub App authentication via GitHub-Script action.
-    Target discovery scope is configuration, not code - see config/targets.json.
+    Enterprise policy API calls prefer GitHub App context first, then fall back to
+    CUSTO_ENTERPRISE_PAT only when App access fails and PAT is configured.
 #>
 
 [CmdletBinding()]
@@ -45,10 +38,6 @@ $script:Summary = @{
 #region Helper Functions
 
 function Get-TargetScope {
-    <#
-    .SYNOPSIS
-        Reads repository discovery scope from config/targets.json.
-    #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
@@ -60,7 +49,6 @@ function Get-TargetScope {
     }
 
     $config = Get-Content -Path $ConfigPath -Raw | ConvertFrom-Json
-
     if (-not $config.scope) {
         throw "Missing required 'scope' in: $ConfigPath"
     }
@@ -76,11 +64,58 @@ function Get-TargetScope {
     return $config
 }
 
+function Get-PolicyDocuments {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$PolicyPath
+    )
+
+    if (-not (Test-Path $PolicyPath)) {
+        throw "Policy path not found at: $PolicyPath"
+    }
+
+    $policyFiles = Get-ChildItem -Path $PolicyPath -File -Filter '*.policy.json' | Sort-Object Name
+    if ($policyFiles.Count -eq 0) {
+        throw "No policy documents found in: $PolicyPath"
+    }
+
+    $layerOrder = @{
+        enterprise   = 1
+        organization = 2
+        repository   = 3
+    }
+
+    $documents = @()
+    foreach ($policyFile in $policyFiles) {
+        $doc = Get-Content -Path $policyFile.FullName -Raw | ConvertFrom-Json -AsHashtable
+
+        if (-not $doc.layer) {
+            throw "Policy '$($policyFile.Name)' is missing required field 'layer'."
+        }
+        if (-not $doc.capability) {
+            throw "Policy '$($policyFile.Name)' is missing required field 'capability'."
+        }
+        if (-not $doc.ContainsKey('enabled')) {
+            throw "Policy '$($policyFile.Name)' is missing required field 'enabled'."
+        }
+
+        $doc.layer = $doc.layer.ToLowerInvariant()
+        $doc.capability = $doc.capability.ToLowerInvariant()
+        $doc.sourceFile = $policyFile.FullName
+
+        if (-not $layerOrder.ContainsKey($doc.layer)) {
+            throw "Policy '$($policyFile.Name)' has unsupported layer '$($doc.layer)'."
+        }
+
+        $documents += $doc
+    }
+
+    $documents |
+        Sort-Object @{ Expression = { $layerOrder[$_.layer] } }, @{ Expression = { $_.capability } }, @{ Expression = { $_.sourceFile } }
+}
+
 function Get-FileSets {
-    <#
-    .SYNOPSIS
-        Discovers available file sets from the Repos/ directory structure.
-    #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
@@ -125,15 +160,58 @@ function Get-FileSets {
     }
 
     $fileSetTable | Format-Table -AutoSize | Out-String
-
     return $fileSets
 }
 
+function Invoke-EnterprisePolicyApi {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [ValidateSet('GET', 'POST', 'PUT', 'PATCH', 'DELETE')]
+        [string]$Method,
+
+        [Parameter(Mandatory)]
+        [string]$ApiEndpoint,
+
+        [object]$Body,
+
+        [Parameter(Mandatory)]
+        [object]$Context
+    )
+
+    try {
+        return (Invoke-GitHubAPI -Method $Method -ApiEndpoint $ApiEndpoint -Body $Body -Context $Context).Response
+    } catch {
+        $enterprisePat = $env:CUSTO_ENTERPRISE_PAT
+        if ([string]::IsNullOrWhiteSpace($enterprisePat)) {
+            throw
+        }
+
+        Write-Host "ℹ️  App auth failed for $ApiEndpoint; retrying with CUSTO_ENTERPRISE_PAT"
+
+        $headers = @{
+            Authorization          = "Bearer $enterprisePat"
+            Accept                 = 'application/vnd.github+json'
+            'X-GitHub-Api-Version' = '2022-11-28'
+        }
+
+        $uri = "https://api.github.com$ApiEndpoint"
+        $invokeArgs = @{
+            Method  = $Method
+            Uri     = $uri
+            Headers = $headers
+        }
+
+        if ($null -ne $Body) {
+            $invokeArgs.ContentType = 'application/json'
+            $invokeArgs.Body = $Body | ConvertTo-Json -Depth 30
+        }
+
+        return Invoke-RestMethod @invokeArgs
+    }
+}
+
 function Get-AllAccessibleRepository {
-    <#
-    .SYNOPSIS
-        Lists all repositories visible to the current installation token.
-    #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
@@ -166,58 +244,7 @@ function Get-AllAccessibleRepository {
     return $allRepos
 }
 
-function Invoke-EnterprisePolicyApi {
-    <#
-    .SYNOPSIS
-        Calls enterprise policy endpoints with PAT when available, otherwise with app context.
-    #>
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory)]
-        [ValidateSet('GET', 'POST', 'PUT', 'PATCH', 'DELETE')]
-        [string]$Method,
-
-        [Parameter(Mandatory)]
-        [string]$ApiEndpoint,
-
-        [hashtable]$Body,
-
-        [Parameter(Mandatory)]
-        [object]$Context
-    )
-
-    $enterprisePat = $env:CUSTO_ENTERPRISE_PAT
-    if (-not [string]::IsNullOrWhiteSpace($enterprisePat)) {
-        $headers = @{
-            Authorization          = "Bearer $enterprisePat"
-            Accept                 = 'application/vnd.github+json'
-            'X-GitHub-Api-Version' = '2022-11-28'
-        }
-
-        $uri = "https://api.github.com$ApiEndpoint"
-        $invokeArgs = @{
-            Method  = $Method
-            Uri     = $uri
-            Headers = $headers
-        }
-
-        if ($Body) {
-            $invokeArgs.ContentType = 'application/json'
-            $invokeArgs.Body = $Body | ConvertTo-Json -Depth 20
-        }
-
-        return Invoke-RestMethod @invokeArgs
-    }
-
-    return (Invoke-GitHubAPI -Method $Method -ApiEndpoint $ApiEndpoint -Body $Body -Context $Context).Response
-}
-
 function Sync-EnterpriseCustomPropertySchema {
-    <#
-    .SYNOPSIS
-        Ensures enterprise-level custom property definitions exist with allowed values
-        derived from the Repos/ file-set tree.
-    #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
@@ -269,11 +296,59 @@ function Sync-EnterpriseCustomPropertySchema {
     Write-Host "   - ${SubscriptionPropertyName}: $($subscriptionValues -join ', ')"
 }
 
+function Sync-EnterpriseRulesets {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$Enterprise,
+
+        [Parameter(Mandatory)]
+        [object[]]$Rulesets,
+
+        [Parameter(Mandatory)]
+        [object]$Context
+    )
+
+    if (-not $Rulesets -or $Rulesets.Count -eq 0) {
+        Write-Host "ℹ️  No enterprise rulesets declared for '$Enterprise'"
+        return
+    }
+
+    $existingRulesets = @(
+        Invoke-EnterprisePolicyApi -Method GET -ApiEndpoint "/enterprises/$Enterprise/rulesets" -Context $Context
+    )
+
+    $existingByName = @{}
+    foreach ($existing in $existingRulesets) {
+        if ($existing.name) {
+            $existingByName[$existing.name] = $existing
+        }
+    }
+
+    foreach ($ruleset in $Rulesets) {
+        if (-not $ruleset.name) {
+            throw "Enterprise ruleset entry is missing required field 'name'."
+        }
+
+        $payload = @{}
+        foreach ($key in $ruleset.Keys) {
+            if ($key -ne 'id' -and $key -ne 'source' -and $key -ne 'source_type' -and $key -ne 'created_at' -and $key -ne 'updated_at') {
+                $payload[$key] = $ruleset[$key]
+            }
+        }
+
+        if ($existingByName.ContainsKey($ruleset.name)) {
+            $rulesetId = $existingByName[$ruleset.name].id
+            Invoke-EnterprisePolicyApi -Method PUT -ApiEndpoint "/enterprises/$Enterprise/rulesets/$rulesetId" -Body $payload -Context $Context | Out-Null
+            Write-Host "✅ Updated enterprise ruleset '$($ruleset.name)'"
+        } else {
+            Invoke-EnterprisePolicyApi -Method POST -ApiEndpoint "/enterprises/$Enterprise/rulesets" -Body $payload -Context $Context | Out-Null
+            Write-Host "✅ Created enterprise ruleset '$($ruleset.name)'"
+        }
+    }
+}
+
 function Get-SubscribingRepository {
-    <#
-    .SYNOPSIS
-        Queries an organization's repositories for their Type and SubscribeTo custom properties.
-    #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
@@ -284,30 +359,18 @@ function Get-SubscribingRepository {
     )
 
     $repos = Get-GitHubRepository -Owner $Owner -Context $Context
-
     $subscribingRepos = @()
 
     foreach ($repo in $repos) {
         $customProps = $repo.CustomProperties
-
-        if (-not $customProps) {
-            continue
-        }
+        if (-not $customProps) { continue }
 
         $type = ($customProps | Where-Object Name -EQ 'Type').Value
         $subscribeTo = ($customProps | Where-Object Name -EQ 'SubscribeTo').Value
 
-        if (-not $type -or -not $subscribeTo) {
-            continue
-        }
-
-        if ($subscribeTo -is [string]) {
-            $subscribeTo = @($subscribeTo)
-        }
-
-        if ($subscribeTo.Count -eq 0) {
-            continue
-        }
+        if (-not $type -or -not $subscribeTo) { continue }
+        if ($subscribeTo -is [string]) { $subscribeTo = @($subscribeTo) }
+        if ($subscribeTo.Count -eq 0) { continue }
 
         $subscribingRepos += @{
             Name          = $repo.Name
@@ -319,63 +382,35 @@ function Get-SubscribingRepository {
         }
     }
 
-    $subscribingRepos | ForEach-Object {
-        [PSCustomObject]@{
-            Owner       = $_.Owner
-            Repo        = $_.Name
-            Type        = $_.Type
-            SubscribeTo = $_.SubscribeTo -join ', '
-        }
-    } | Format-Table -AutoSize | Out-String
-
     return $subscribingRepos
 }
 
 function Get-SubscribingRepositoryByOrganizationFromAllAccess {
-    <#
-    .SYNOPSIS
-        Discovers subscribing repositories from all repositories visible to the
-        current installation token, grouped by owning organization.
-    #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
-        [object]$Context,
-
-        [object[]]$Repositories
+        [object]$Context
     )
 
-    $allRepos = if ($Repositories) { $Repositories } else { Get-AllAccessibleRepository -Context $Context }
-
+    $allRepos = Get-AllAccessibleRepository -Context $Context
     $reposByOrg = @{}
 
     foreach ($repo in $allRepos) {
-        if ($repo.owner.type -ne 'Organization') {
-            continue
-        }
+        if ($repo.owner.type -ne 'Organization') { continue }
 
         $owner = $repo.owner.login
         $repoName = $repo.name
 
         $customProps = (Invoke-GitHubAPI -Method GET -ApiEndpoint "/repos/$owner/$repoName/properties/values" -Context $Context).Response
-
         $typeProp = $customProps | Where-Object { $_.property_name -eq 'Type' }
         $subscribeToProp = $customProps | Where-Object { $_.property_name -eq 'SubscribeTo' }
 
         $type = $typeProp.value
         $subscribeTo = $subscribeToProp.value
 
-        if (-not $type -or -not $subscribeTo) {
-            continue
-        }
-
-        if ($subscribeTo -is [string]) {
-            $subscribeTo = @($subscribeTo)
-        }
-
-        if ($subscribeTo.Count -eq 0) {
-            continue
-        }
+        if (-not $type -or -not $subscribeTo) { continue }
+        if ($subscribeTo -is [string]) { $subscribeTo = @($subscribeTo) }
+        if ($subscribeTo.Count -eq 0) { continue }
 
         $repoEntry = @{
             Name          = $repoName
@@ -389,90 +424,13 @@ function Get-SubscribingRepositoryByOrganizationFromAllAccess {
         if (-not $reposByOrg.ContainsKey($owner)) {
             $reposByOrg[$owner] = @()
         }
-
         $reposByOrg[$owner] += $repoEntry
     }
-
-    $reposByOrg.GetEnumerator() | ForEach-Object {
-        $org = $_.Key
-        $_.Value | ForEach-Object {
-            [PSCustomObject]@{
-                Owner       = $org
-                Repo        = $_.Name
-                Type        = $_.Type
-                SubscribeTo = $_.SubscribeTo -join ', '
-            }
-        }
-    } | Format-Table -AutoSize | Out-String
 
     return $reposByOrg
 }
 
-function Invoke-PolicyEngine {
-    <#
-    .SYNOPSIS
-        Applies top-level policy controls before repository sync.
-    .DESCRIPTION
-        Current policy order:
-        1) Enterprise policy layer
-        2) Organization and repository synchronization
-    #>
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory)]
-        [pscustomobject]$TargetScope,
-
-        [Parameter(Mandatory)]
-        [hashtable]$FileSets,
-
-        [Parameter(Mandatory)]
-        [object]$Context
-    )
-
-    LogGroup '🧭 Policy engine: enterprise controls first' {
-        if (-not [string]::IsNullOrWhiteSpace($env:CUSTO_ENTERPRISE_PAT)) {
-            Write-Host 'Using CUSTO_ENTERPRISE_PAT for enterprise policy API calls'
-        } else {
-            Write-Host 'Using GitHub App token for enterprise policy API calls'
-        }
-
-        if ($TargetScope.customProperties.enabled -eq $true) {
-            if ($TargetScope.customProperties.scope -ne 'enterprise') {
-                throw "Unsupported customProperties.scope '$($TargetScope.customProperties.scope)'."
-            }
-            if (-not $TargetScope.customProperties.enterprise) {
-                throw "customProperties.enterprise is required when customProperties.enabled is true."
-            }
-
-            $typePropertyName = if ($TargetScope.customProperties.typePropertyName) {
-                $TargetScope.customProperties.typePropertyName
-            } else {
-                'Type'
-            }
-
-            $subscriptionPropertyName = if ($TargetScope.customProperties.subscriptionPropertyName) {
-                $TargetScope.customProperties.subscriptionPropertyName
-            } else {
-                'SubscribeTo'
-            }
-
-            Sync-EnterpriseCustomPropertySchema `
-                -Enterprise $TargetScope.customProperties.enterprise `
-                -FileSets $FileSets `
-                -Context $Context `
-                -TypePropertyName $typePropertyName `
-                -SubscriptionPropertyName $subscriptionPropertyName
-        } else {
-            Write-Host 'ℹ️  customProperties sync disabled by config'
-        }
-    }
-}
-
 function Get-AllSubscribingRepository {
-    <#
-    .SYNOPSIS
-        Resolves subscribing repositories after policy has been applied.
-    #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
@@ -486,7 +444,6 @@ function Get-AllSubscribingRepository {
 
     if ($TargetScope.scope -eq 'all-access') {
         $reposByOrg = Get-SubscribingRepositoryByOrganizationFromAllAccess -Context $Context
-
         foreach ($org in @($reposByOrg.Keys | Sort-Object)) {
             Write-Host "Found $($reposByOrg[$org].Count) subscribing repositories in $org"
             $subscribingRepos += $reposByOrg[$org]
@@ -502,11 +459,74 @@ function Get-AllSubscribingRepository {
     return $subscribingRepos
 }
 
+function Invoke-PolicyEngine {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [object[]]$Policies,
+
+        [Parameter(Mandatory)]
+        [hashtable]$FileSets,
+
+        [Parameter(Mandatory)]
+        [pscustomobject]$TargetScope,
+
+        [Parameter(Mandatory)]
+        [object]$Context
+    )
+
+    $state = @{
+        RepoFileSubscriptionEnabled = $false
+    }
+
+    foreach ($policy in $Policies) {
+        $name = if ($policy.name) { $policy.name } else { [System.IO.Path]::GetFileName($policy.sourceFile) }
+        $capabilityId = "$($policy.layer).$($policy.capability)"
+
+        if ($policy.enabled -ne $true) {
+            Write-Host "⏭️  Policy disabled: $name ($capabilityId)"
+            continue
+        }
+
+        Write-Host "▶️  Applying policy: $name ($capabilityId)"
+
+        switch ($capabilityId) {
+            'enterprise.repo-custom-property' {
+                $enterprise = $policy.config.enterprise
+                if (-not $enterprise) { throw "Policy '$name' requires config.enterprise." }
+
+                $typeName = if ($policy.config.typePropertyName) { $policy.config.typePropertyName } else { 'Type' }
+                $subscriptionName = if ($policy.config.subscriptionPropertyName) { $policy.config.subscriptionPropertyName } else { 'SubscribeTo' }
+
+                Sync-EnterpriseCustomPropertySchema `
+                    -Enterprise $enterprise `
+                    -FileSets $FileSets `
+                    -Context $Context `
+                    -TypePropertyName $typeName `
+                    -SubscriptionPropertyName $subscriptionName
+            }
+            'enterprise.repo-rulesets' {
+                $enterprise = $policy.config.enterprise
+                if (-not $enterprise) { throw "Policy '$name' requires config.enterprise." }
+                $rulesets = if ($policy.config.rulesets) { @($policy.config.rulesets) } else { @() }
+                Sync-EnterpriseRulesets -Enterprise $enterprise -Rulesets $rulesets -Context $Context
+            }
+            'organization.none' {
+                Write-Host "ℹ️  Organization policy layer intentionally empty"
+            }
+            'repository.file-subscription-service' {
+                $state.RepoFileSubscriptionEnabled = $true
+            }
+            default {
+                throw "Unsupported policy capability '$capabilityId' in '$name'."
+            }
+        }
+    }
+
+    return $state
+}
+
 function Sync-RepositoryFile {
-    <#
-    .SYNOPSIS
-        Syncs files to a single repository.
-    #>
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute(
         'PSAvoidUsingWriteHost', '', Scope = 'Function',
         Justification = 'Intended for logging in GitHub Actions runners.'
@@ -549,7 +569,6 @@ function Sync-RepositoryFile {
 
     $script:Summary.TotalReposProcessed++
 
-    # Validate before opening a log group - skipped repos stay quiet
     if (-not $FileSets.ContainsKey($type)) {
         Write-Host "⚠️  $repoFullName - Type folder '$type' not found, skipping"
         $script:Summary.ReposSkipped++
@@ -571,7 +590,6 @@ function Sync-RepositoryFile {
         return
     }
 
-    # All real work inside a log group
     LogGroup "📦 $repoFullName" {
         foreach ($selection in $subscribeTo) {
             if ($FileSets[$type].ContainsKey($selection)) {
@@ -593,7 +611,6 @@ function Sync-RepositoryFile {
             try {
                 Set-GitHubGitConfig -Context $Context
 
-                # Branch setup
                 $remoteBranches = git branch -r 2>&1
                 if ($remoteBranches -match "origin/$BranchName") {
                     git fetch origin $BranchName 2>&1 | Out-Null
@@ -602,7 +619,6 @@ function Sync-RepositoryFile {
                     git checkout -b $BranchName 2>&1 | Out-Null
                 }
 
-                # Copy files
                 foreach ($fileInfo in $filesToSync) {
                     $targetPath = Join-Path $clonePath $fileInfo.RelativePath
                     $targetDir = Split-Path $targetPath -Parent
@@ -612,7 +628,6 @@ function Sync-RepositoryFile {
                     Copy-Item -Path $fileInfo.SourcePath -Destination $targetPath -Force
                 }
 
-                # Detect changes
                 $status = git status --porcelain 2>&1
                 if ([string]::IsNullOrWhiteSpace($status)) {
                     Write-Host '✅ Already in sync'
@@ -622,7 +637,6 @@ function Sync-RepositoryFile {
 
                 $status -split "`n" | ForEach-Object { Write-Host "  $_" }
 
-                # Commit and push
                 git add --all 2>&1 | Out-Null
                 git commit -m $CommitMessage 2>&1 | Out-Null
                 $pushResult = git push --force --set-upstream origin $BranchName 2>&1
@@ -630,7 +644,6 @@ function Sync-RepositoryFile {
                     throw "Git push failed: $pushResult"
                 }
 
-                # Create or update PR
                 $existingPRs = (Invoke-GitHubAPI -Method GET -ApiEndpoint "/repos/$owner/$repoName/pulls" -Body @{
                         head  = "${owner}:${BranchName}"
                         state = 'open'
@@ -705,7 +718,24 @@ try {
         }
     }
 
-    Invoke-PolicyEngine -TargetScope $targetScope -FileSets $fileSets -Context $context
+    LogGroup '📜 Load policy documents' {
+        $policyPath = if ($targetScope.policyPath) { $targetScope.policyPath } else { '../Policies' }
+        if (-not [System.IO.Path]::IsPathRooted($policyPath)) {
+            $policyPath = Join-Path $PSScriptRoot $policyPath
+        }
+        $policyPath = Resolve-Path $policyPath
+        $policies = Get-PolicyDocuments -PolicyPath $policyPath
+        Write-Host "Loaded $($policies.Count) policy documents from $policyPath"
+    }
+
+    LogGroup '🧭 Execute policy engine' {
+        $policyState = Invoke-PolicyEngine -Policies $policies -FileSets $fileSets -TargetScope $targetScope -Context $context
+    }
+
+    if ($policyState.RepoFileSubscriptionEnabled -ne $true) {
+        Write-Host 'ℹ️  Repository file-subscription policy is disabled; file sync skipped.'
+        exit 0
+    }
 
     LogGroup '🔍 Find subscribing repositories' {
         $subscribingRepos = Get-AllSubscribingRepository -TargetScope $targetScope -Context $context
@@ -717,7 +747,6 @@ try {
         exit 0
     }
 
-    # Sync files to each repository
     $tempPath = Join-Path ([System.IO.Path]::GetTempPath()) "custo-sync-$(Get-Random)"
     New-Item -Path $tempPath -ItemType Directory -Force | Out-Null
 
@@ -749,7 +778,6 @@ The files in this PR are centrally managed. Any local changes to these files wil
         }
     }
 
-    # Summary
     Write-Host ''
     Write-Host '📊 Summary'
     Write-Host "   Processed: $($script:Summary.TotalReposProcessed)"

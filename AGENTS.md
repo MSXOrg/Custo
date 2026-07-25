@@ -33,10 +33,23 @@ cannot run against real repositories until an operator completes these steps:
    (`gh api orgs/PSModule/installations`).
 3. **Set custom properties on target repositories.** Each subscribing module repository needs
    `Type = Module` and `SubscribeTo` including `AGENTS.md` set at the repository level.
-   Custo now maintains allowed values at enterprise level from `Repos/` file sets when
-   `customProperties.enabled=true` in `config/targets.json`.
+   Custo now maintains allowed values at enterprise level from `Repos/` file sets via policy
+   documents in `Policies/`.
 4. **Dry-run via `workflow_dispatch`.** Trigger the `Sync Managed Files` workflow manually first
    and review the summary before relying on the daily schedule.
+
+## Policy documents
+
+Policy configuration is declared in `Policies/*.policy.json` and executed in fixed layer order:
+1. enterprise
+2. organization
+3. repository
+
+Current policies:
+- `enterprise-repo-custom-property.policy.json`
+- `enterprise-repo-rulesets.policy.json`
+- `organization-none.policy.json`
+- `repository-file-subscription-service.policy.json`
 
 Until step 1 is complete, the workflow will fail at the authentication step
 (`Connect-GitHub App`) — this is the current, expected blocker for this MVP.

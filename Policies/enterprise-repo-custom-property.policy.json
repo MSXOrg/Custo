@@ -1,0 +1,12 @@
+{
+  "version": "1.0",
+  "name": "Enterprise repo custom property policy",
+  "layer": "enterprise",
+  "capability": "repo-custom-property",
+  "enabled": true,
+  "config": {
+    "enterprise": "MSXOrg",
+    "typePropertyName": "Type",
+    "subscriptionPropertyName": "SubscribeTo"
+  }
+}

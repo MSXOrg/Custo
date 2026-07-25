@@ -1,0 +1,11 @@
+{
+  "version": "1.0",
+  "name": "Enterprise repo ruleset policy",
+  "layer": "enterprise",
+  "capability": "repo-rulesets",
+  "enabled": true,
+  "config": {
+    "enterprise": "MSXOrg",
+    "rulesets": []
+  }
+}
