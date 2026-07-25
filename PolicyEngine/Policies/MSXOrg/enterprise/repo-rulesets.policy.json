@@ -6,6 +6,60 @@
   "enabled": true,
   "config": {
     "enterprise": "MSXOrg",
-    "rulesets": []
+    "rulesets": [
+      {
+        "name": "Custo default branch policy",
+        "target": "branch",
+        "enforcement": "disabled",
+        "conditions": {
+          "organization_name_and_repository_property": {
+            "organization_name": {
+              "include": [
+                "~ALL"
+              ],
+              "exclude": []
+            },
+            "repository_property": {
+              "include": [
+                {
+                  "name": "Type",
+                  "property_values": [
+                    "Module"
+                  ],
+                  "source": "custom"
+                }
+              ],
+              "exclude": []
+            },
+            "ref_name": {
+              "include": [
+                "~DEFAULT_BRANCH"
+              ],
+              "exclude": []
+            }
+          }
+        },
+        "rules": [
+          {
+            "type": "required_linear_history"
+          },
+          {
+            "type": "pull_request",
+            "parameters": {
+              "dismiss_stale_reviews_on_push": true,
+              "require_code_owner_review": false,
+              "require_last_push_approval": false,
+              "required_approving_review_count": 1,
+              "required_review_thread_resolution": true,
+              "allowed_merge_methods": [
+                "merge",
+                "squash",
+                "rebase"
+              ]
+            }
+          }
+        ]
+      }
+    ]
   }
 }

@@ -56,7 +56,7 @@ The [`scripts/Sync-Files.ps1`](scripts/Sync-Files.ps1) script, run by the
 4. Applies policy controls in order: **Enterprise** first, then **Organization**, then **Repository**.
 5. Runs enterprise policy capabilities such as:
    - `repo-custom-property` (maintain `Type` and `SubscribeTo` enterprise property definitions)
-   - `repo-rulesets` (maintain enterprise repository rulesets)
+   - `repo-rulesets` (maintain enterprise repository rulesets; policy payload controls conditions/rules)
 6. Discovers subscribing repositories from all accessible repositories (or explicit organizations
    when configured) and reads their `Type` and `SubscribeTo` custom properties.
 7. Executes repository capability `file-subscription-service`, cloning repositories, syncing files,
@@ -91,6 +91,11 @@ Configure these repository secrets before enabling the scheduled sync:
 - `CUSTO_BOT_CLIENT_ID`
 - `CUSTO_BOT_PRIVATE_KEY`
 - `CUSTO_ENTERPRISE_PAT` (optional fallback PAT for enterprise policy endpoints, e.g. enterprise rulesets, with `admin:enterprise`)
+
+Default enterprise policy configs live at:
+
+- `PolicyEngine/Policies/MSXOrg/enterprise/repo-custom-property.policy.json`
+- `PolicyEngine/Policies/MSXOrg/enterprise/repo-rulesets.policy.json`
 
 See [`AGENTS.md`](AGENTS.md) for operator runbook steps and current rollout blockers.
 

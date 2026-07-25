@@ -7,6 +7,9 @@
   "config": {
     "enterprise": "MSXOrg",
     "typePropertyName": "Type",
-    "subscriptionPropertyName": "SubscribeTo"
+    "subscriptionPropertyName": "SubscribeTo",
+    "required": false,
+    "valuesEditableBy": "org_actors",
+    "requireExplicitValues": false
   }
 }

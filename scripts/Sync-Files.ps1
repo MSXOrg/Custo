@@ -312,7 +312,10 @@ function Sync-EnterpriseCustomPropertySchema {
         [object]$Context,
 
         [string]$TypePropertyName = 'Type',
-        [string]$SubscriptionPropertyName = 'SubscribeTo'
+        [string]$SubscriptionPropertyName = 'SubscribeTo',
+        [bool]$Required = $false,
+        [string]$ValuesEditableBy = 'org_actors',
+        [bool]$RequireExplicitValues = $false
     )
 
     $typeValues = @($FileSets.Keys | Sort-Object -Unique)
@@ -332,18 +335,22 @@ function Sync-EnterpriseCustomPropertySchema {
 
     Invoke-EnterprisePolicyApi -Method PUT -ApiEndpoint "/enterprises/$Enterprise/properties/schema/$TypePropertyName" -Body @{
         value_type     = 'single_select'
-        required       = $false
+        required       = $Required
         default_value  = $null
         description    = 'Repository type used by Custo managed-file distribution.'
         allowed_values = $typeValues
+        values_editable_by = $ValuesEditableBy
+        require_explicit_values = $RequireExplicitValues
     } -Context $Context | Out-Null
 
     Invoke-EnterprisePolicyApi -Method PUT -ApiEndpoint "/enterprises/$Enterprise/properties/schema/$SubscriptionPropertyName" -Body @{
         value_type     = 'multi_select'
-        required       = $false
+        required       = $Required
         default_value  = $null
         description    = 'Managed file sets the repository subscribes to from Custo.'
         allowed_values = $subscriptionValues
+        values_editable_by = $ValuesEditableBy
+        require_explicit_values = $RequireExplicitValues
     } -Context $Context | Out-Null
 
     Write-Host "✅ Synced enterprise custom-property schema on '$Enterprise'"
@@ -552,13 +559,19 @@ function Invoke-PolicyEngine {
 
                 $typeName = if ($policy.config.typePropertyName) { $policy.config.typePropertyName } else { 'Type' }
                 $subscriptionName = if ($policy.config.subscriptionPropertyName) { $policy.config.subscriptionPropertyName } else { 'SubscribeTo' }
+                $required = if ($policy.config.ContainsKey('required')) { [bool]$policy.config.required } else { $false }
+                $valuesEditableBy = if ($policy.config.valuesEditableBy) { [string]$policy.config.valuesEditableBy } else { 'org_actors' }
+                $requireExplicitValues = if ($policy.config.ContainsKey('requireExplicitValues')) { [bool]$policy.config.requireExplicitValues } else { $false }
 
                 Sync-EnterpriseCustomPropertySchema `
                     -Enterprise $enterprise `
                     -FileSets $FileSets `
                     -Context $Context `
                     -TypePropertyName $typeName `
-                    -SubscriptionPropertyName $subscriptionName
+                    -SubscriptionPropertyName $subscriptionName `
+                    -Required $required `
+                    -ValuesEditableBy $valuesEditableBy `
+                    -RequireExplicitValues $requireExplicitValues
             }
             'enterprise.repo-rulesets' {
                 $enterprise = $policy.config.enterprise

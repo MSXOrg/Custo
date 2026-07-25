@@ -4,5 +4,18 @@
   "layer": "enterprise",
   "capability": "repo-rulesets",
   "authPreference": "github-app-first-fallback-enterprise-pat",
-  "description": "Maintains enterprise-level repository rulesets."
+  "description": "Maintains enterprise-level repository rulesets.",
+  "configSchema": {
+    "required": ["enterprise", "rulesets"],
+    "properties": {
+      "enterprise": {
+        "type": "string",
+        "description": "Enterprise slug to maintain rulesets on."
+      },
+      "rulesets": {
+        "type": "array",
+        "description": "Ruleset definitions mapped directly to GitHub enterprise ruleset payloads."
+      }
+    }
+  }
 }
