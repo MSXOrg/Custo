@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Custo target organizations",
+  "description": "Organizations that the Sync Managed Files workflow discovers subscribing repositories in.",
+  "type": "object",
+  "required": ["organizations"],
+  "properties": {
+    "organizations": {
+      "type": "array",
+      "description": "GitHub organization logins to scan for subscribing repositories.",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "minItems": 1,
+      "uniqueItems": true
+    }
+  },
+  "additionalProperties": false
+}

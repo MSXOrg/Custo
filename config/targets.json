@@ -1,0 +1,6 @@
+{
+  "$schema": "./targets.schema.json",
+  "organizations": [
+    "PSModule"
+  ]
+}
