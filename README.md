@@ -1,2 +1,75 @@
 # Custo
-Central managed-file distribution and compliance orchestration for MSX initiatives
+
+Custo is the central managed-file distribution engine for MSX initiatives. It syncs shared,
+centrally-owned files into subscribing repositories by pull request, so every repository
+inherits the same governance, linting, and agent-context files without copy-pasting them by hand.
+
+## Source of truth separation
+
+- **Standards** — *what* every initiative must define and *why* — live in
+  [`MSXOrg/docs`](https://github.com/MSXOrg/docs), specifically the
+  [Organization Standard](https://msxorg.github.io/docs/Ways-of-Working/Organization-Standard/).
+- **Initiative implementation guidance** — how a specific initiative applies those standards —
+  lives in each initiative's own docs repository, for example
+  [`PSModule/docs`](https://github.com/PSModule/docs).
+- **Distribution runtime** — *how* managed files are actually delivered to repositories — lives
+  here, in Custo.
+
+Custo does not decide what files initiatives should manage. It only distributes what each
+initiative's file sets declare, following the [managed files contract](https://msxorg.github.io/docs/Ways-of-Working/Organization-Standard/#managed-files)
+defined in MSXOrg/docs.
+
+Custo replaces [`PSModule/Distributor`](https://github.com/PSModule/Distributor) as the runtime
+engine for the PSModule initiative, generalized so other initiatives can reuse it instead of
+building their own distributor from scratch.
+
+## How it works
+
+File sets are organized by target organization, repository type, and selection:
+
+```text
+Repos/{Type}/{Selection}/
+```
+
+- **Type** — groups repositories by kind (`Module`, `Action`, `Template`, `Workflow`, ...).
+- **Selection** — an individual file set repositories opt into via the `SubscribeTo` custom
+  property. Each selection folder mirrors the root of a target repository.
+
+Target organizations are declared in [`config/targets.json`](config/targets.json), not hardcoded
+in the sync script. This keeps Custo org-agnostic: adding a new initiative organization is a
+config change, not a code change.
+
+The [`scripts/Sync-Files.ps1`](scripts/Sync-Files.ps1) script, run by the
+[`Sync Managed Files`](.github/workflows/sync-files.yml) workflow:
+
+1. Reads the target organizations from `config/targets.json`.
+2. Discovers file sets under `Repos/`.
+3. For each target org, queries repositories for their `Type` and `SubscribeTo` custom
+   properties.
+4. Clones subscribing repositories, copies the relevant files, and opens or updates a
+   `managed-files/update` pull request when changes are detected.
+
+## MVP rollout scope
+
+The first managed resource is **`AGENTS.md`** for PowerShell module repositories
+(`Repos/Module/AGENTS.md/AGENTS.md`), targeting the `PSModule` organization by default. The file
+is a thin pointer into the central docs rather than a duplicated process document, matching the
+pattern already used by [`PSModule/Template-PSModule`](https://github.com/PSModule/Template-PSModule)
+and [`PSModule/memory`](https://github.com/PSModule/memory).
+
+Additional file sets and target organizations are added incrementally after this MVP is proven.
+
+## Required secrets
+
+The sync workflow authenticates as a GitHub App with `contents`, `pull_requests`, and
+`repository_custom_properties` access on target repositories. Configure these repository secrets
+before enabling the scheduled sync:
+
+- `CUSTO_BOT_CLIENT_ID`
+- `CUSTO_BOT_PRIVATE_KEY`
+
+See [`AGENTS.md`](AGENTS.md) for operator runbook steps and current rollout blockers.
+
+## License
+
+MIT License — see [LICENSE](LICENSE).
