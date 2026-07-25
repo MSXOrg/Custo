@@ -394,9 +394,6 @@ function Sync-EnterpriseCustomPropertySchema {
         [hashtable]$FileSets,
 
         [Parameter(Mandatory)]
-        [hashtable]$CapabilityCatalog,
-
-        [Parameter(Mandatory)]
         [object]$Context,
 
         [string]$TypePropertyName = 'Type',
@@ -723,6 +720,9 @@ function Invoke-PoliciesForScope {
 
         [Parameter(Mandatory)]
         [hashtable]$FileSets,
+
+        [Parameter(Mandatory)]
+        [hashtable]$CapabilityCatalog,
 
         [Parameter(Mandatory)]
         [object]$Context,
