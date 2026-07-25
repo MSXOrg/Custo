@@ -85,14 +85,18 @@ Describe 'Write-ConfigDiff' {
 }
 
 Describe 'Resolve-PolicyLayerPaths' {
+    BeforeAll {
+        $script:PolicyRootFixture = Join-Path ([System.IO.Path]::GetTempPath()) 'PolicyEngine'
+    }
+
     It 'returns the enterprise folder for the enterprise layer' {
-        $paths = Resolve-PolicyLayerPaths -PolicyRoot 'C:\root\PolicyEngine' -Enterprise 'MSXOrg' -Layer 'enterprise'
-        $paths | Should -Contain (Join-Path 'C:\root\PolicyEngine' 'Policies' 'MSXOrg' 'enterprise')
+        $paths = Resolve-PolicyLayerPaths -PolicyRoot $script:PolicyRootFixture -Enterprise 'MSXOrg' -Layer 'enterprise'
+        $paths | Should -Contain (Join-Path $script:PolicyRootFixture 'Policies' 'MSXOrg' 'enterprise')
     }
 
     It 'includes _default and org-specific folders for the repository layer' {
-        $paths = Resolve-PolicyLayerPaths -PolicyRoot 'C:\root\PolicyEngine' -Enterprise 'MSXOrg' -Layer 'repository' -Organization 'PSModule' -Repository 'GitHub'
-        $repoBase = Join-Path (Join-Path (Join-Path 'C:\root\PolicyEngine' 'Policies') 'MSXOrg') 'repository'
+        $paths = Resolve-PolicyLayerPaths -PolicyRoot $script:PolicyRootFixture -Enterprise 'MSXOrg' -Layer 'repository' -Organization 'PSModule' -Repository 'GitHub'
+        $repoBase = Join-Path (Join-Path (Join-Path $script:PolicyRootFixture 'Policies') 'MSXOrg') 'repository'
         $paths | Should -Contain (Join-Path $repoBase '_default')
         $paths | Should -Contain (Join-Path (Join-Path $repoBase 'PSModule') '_default')
         $paths | Should -Contain (Join-Path (Join-Path $repoBase 'PSModule') 'GitHub')
@@ -100,6 +104,10 @@ Describe 'Resolve-PolicyLayerPaths' {
 }
 
 Describe 'Invoke-PoliciesForScope authMode routing' {
+    BeforeAll {
+        $script:TempFixture = [System.IO.Path]::GetTempPath()
+    }
+
     It 'routes the capability authMode to the enterprise ruleset handler' {
         $script:CapturedAuthMode = $null
         function Sync-EnterpriseRulesets {
@@ -118,7 +126,7 @@ Describe 'Invoke-PoliciesForScope authMode routing' {
         }
 
         Invoke-PoliciesForScope -Policies @($policy) -FileSets @{} -CapabilityCatalog $catalog `
-            -Context ([pscustomobject]@{}) -Enterprise 'MSXOrg' -TempPath $env:TEMP -WhatIf
+            -Context ([pscustomobject]@{}) -Enterprise 'MSXOrg' -TempPath $script:TempFixture -WhatIf
 
         $script:CapturedAuthMode | Should -Be 'enterprise-pat'
     }
@@ -127,6 +135,6 @@ Describe 'Invoke-PoliciesForScope authMode routing' {
         $catalog = @{ 'enterprise.repo-rulesets' = @{ authMode = 'enterprise-pat' } }
         $policy = @{ layer = 'enterprise'; capability = 'repo-rulesets'; enabled = $false; name = 'rs'; sourceFile = 'x' }
         { Invoke-PoliciesForScope -Policies @($policy) -FileSets @{} -CapabilityCatalog $catalog `
-                -Context ([pscustomobject]@{}) -Enterprise 'MSXOrg' -TempPath $env:TEMP -WhatIf } | Should -Not -Throw
+                -Context ([pscustomobject]@{}) -Enterprise 'MSXOrg' -TempPath $script:TempFixture -WhatIf } | Should -Not -Throw
     }
 }
