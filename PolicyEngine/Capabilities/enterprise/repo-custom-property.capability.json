@@ -3,7 +3,7 @@
   "name": "Enterprise repository custom-property schema",
   "layer": "enterprise",
   "capability": "repo-custom-property",
-  "authPreference": "github-app-first-fallback-enterprise-pat",
+  "authMode": "github-app",
   "description": "Maintains enterprise-level repository custom-property definitions and allowed values.",
   "configSchema": {
     "required": ["enterprise"],

@@ -3,6 +3,6 @@
   "name": "Repository file subscription service",
   "layer": "repository",
   "capability": "file-subscription-service",
-  "authPreference": "github-app",
+  "authMode": "github-app",
   "description": "Synchronizes managed files into subscribing repositories via pull requests."
 }

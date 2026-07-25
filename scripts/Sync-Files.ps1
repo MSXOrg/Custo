@@ -13,8 +13,9 @@
     Policies are loaded dynamically from PolicyEngine/Policies/{enterprise}/...
     Capabilities are loaded dynamically from PolicyEngine/Capabilities/...
 
-    Enterprise policy API calls prefer GitHub App and fall back to CUSTO_ENTERPRISE_PAT when
-    App access is unavailable.
+    Enterprise policy capabilities declare auth mode explicitly:
+    - github-app: use GitHub App installation context
+    - enterprise-pat: use CUSTO_ENTERPRISE_PAT for enterprise-admin endpoints
 #>
 
 [CmdletBinding()]
@@ -294,38 +295,43 @@ function Invoke-EnterprisePolicyApi {
         [object]$Body,
 
         [Parameter(Mandatory)]
+        [ValidateSet('github-app', 'enterprise-pat')]
+        [string]$AuthMode,
+
+        [Parameter(Mandatory)]
         [object]$Context
     )
 
-    try {
-        return (Invoke-GitHubAPI -Method $Method -ApiEndpoint $ApiEndpoint -Body $Body -Context $Context).Response
-    } catch {
-        $enterprisePat = $env:CUSTO_ENTERPRISE_PAT
-        if ([string]::IsNullOrWhiteSpace($enterprisePat)) {
-            throw
+    switch ($AuthMode) {
+        'github-app' {
+            return (Invoke-GitHubAPI -Method $Method -ApiEndpoint $ApiEndpoint -Body $Body -Context $Context).Response
         }
+        'enterprise-pat' {
+            $enterprisePat = $env:CUSTO_ENTERPRISE_PAT
+            if ([string]::IsNullOrWhiteSpace($enterprisePat)) {
+                throw "CUSTO_ENTERPRISE_PAT is required for auth mode 'enterprise-pat' ($ApiEndpoint)."
+            }
 
-        Write-Host "ℹ️  App auth failed for $ApiEndpoint; retrying with CUSTO_ENTERPRISE_PAT"
+            $headers = @{
+                Authorization          = "Bearer $enterprisePat"
+                Accept                 = 'application/vnd.github+json'
+                'X-GitHub-Api-Version' = '2022-11-28'
+            }
 
-        $headers = @{
-            Authorization          = "Bearer $enterprisePat"
-            Accept                 = 'application/vnd.github+json'
-            'X-GitHub-Api-Version' = '2022-11-28'
+            $uri = "https://api.github.com$ApiEndpoint"
+            $invokeArgs = @{
+                Method  = $Method
+                Uri     = $uri
+                Headers = $headers
+            }
+
+            if ($null -ne $Body) {
+                $invokeArgs.ContentType = 'application/json'
+                $invokeArgs.Body = $Body | ConvertTo-Json -Depth 50
+            }
+
+            return Invoke-RestMethod @invokeArgs
         }
-
-        $uri = "https://api.github.com$ApiEndpoint"
-        $invokeArgs = @{
-            Method  = $Method
-            Uri     = $uri
-            Headers = $headers
-        }
-
-        if ($null -ne $Body) {
-            $invokeArgs.ContentType = 'application/json'
-            $invokeArgs.Body = $Body | ConvertTo-Json -Depth 50
-        }
-
-        return Invoke-RestMethod @invokeArgs
     }
 }
 
@@ -388,6 +394,9 @@ function Sync-EnterpriseCustomPropertySchema {
         [hashtable]$FileSets,
 
         [Parameter(Mandatory)]
+        [hashtable]$CapabilityCatalog,
+
+        [Parameter(Mandatory)]
         [object]$Context,
 
         [string]$TypePropertyName = 'Type',
@@ -395,6 +404,9 @@ function Sync-EnterpriseCustomPropertySchema {
         [bool]$Required = $false,
         [object]$ValuesEditableBy = 'org_actors',
         [bool]$RequireExplicitValues = $false,
+        [Parameter(Mandatory)]
+        [ValidateSet('github-app', 'enterprise-pat')]
+        [string]$AuthMode,
         [switch]$WhatIf
     )
 
@@ -430,8 +442,8 @@ function Sync-EnterpriseCustomPropertySchema {
 
     $currentType = $null
     $currentSubscription = $null
-    try { $currentType = Invoke-EnterprisePolicyApi -Method GET -ApiEndpoint "/enterprises/$Enterprise/properties/schema/$TypePropertyName" -Context $Context } catch {}
-    try { $currentSubscription = Invoke-EnterprisePolicyApi -Method GET -ApiEndpoint "/enterprises/$Enterprise/properties/schema/$SubscriptionPropertyName" -Context $Context } catch {}
+    try { $currentType = Invoke-EnterprisePolicyApi -Method GET -ApiEndpoint "/enterprises/$Enterprise/properties/schema/$TypePropertyName" -AuthMode $AuthMode -Context $Context } catch {}
+    try { $currentSubscription = Invoke-EnterprisePolicyApi -Method GET -ApiEndpoint "/enterprises/$Enterprise/properties/schema/$SubscriptionPropertyName" -AuthMode $AuthMode -Context $Context } catch {}
 
     $typeChanged = Write-ConfigDiff -Title "enterprise property '$TypePropertyName'" -Current $currentType -Desired $desiredType
     $subscriptionChanged = Write-ConfigDiff -Title "enterprise property '$SubscriptionPropertyName'" -Current $currentSubscription -Desired $desiredSubscription
@@ -442,12 +454,12 @@ function Sync-EnterpriseCustomPropertySchema {
     }
 
     if ($typeChanged) {
-        Invoke-EnterprisePolicyApi -Method PUT -ApiEndpoint "/enterprises/$Enterprise/properties/schema/$TypePropertyName" -Body $desiredType -Context $Context | Out-Null
+        Invoke-EnterprisePolicyApi -Method PUT -ApiEndpoint "/enterprises/$Enterprise/properties/schema/$TypePropertyName" -Body $desiredType -AuthMode $AuthMode -Context $Context | Out-Null
         Write-Host "✅ Updated enterprise property '$TypePropertyName'"
     }
 
     if ($subscriptionChanged) {
-        Invoke-EnterprisePolicyApi -Method PUT -ApiEndpoint "/enterprises/$Enterprise/properties/schema/$SubscriptionPropertyName" -Body $desiredSubscription -Context $Context | Out-Null
+        Invoke-EnterprisePolicyApi -Method PUT -ApiEndpoint "/enterprises/$Enterprise/properties/schema/$SubscriptionPropertyName" -Body $desiredSubscription -AuthMode $AuthMode -Context $Context | Out-Null
         Write-Host "✅ Updated enterprise property '$SubscriptionPropertyName'"
     }
 }
@@ -464,6 +476,10 @@ function Sync-EnterpriseRulesets {
         [Parameter(Mandatory)]
         [object]$Context,
 
+        [Parameter(Mandatory)]
+        [ValidateSet('github-app', 'enterprise-pat')]
+        [string]$AuthMode,
+
         [switch]$WhatIf
     )
 
@@ -473,7 +489,7 @@ function Sync-EnterpriseRulesets {
     }
 
     $existingRulesets = @(
-        Invoke-EnterprisePolicyApi -Method GET -ApiEndpoint "/enterprises/$Enterprise/rulesets" -Context $Context
+        Invoke-EnterprisePolicyApi -Method GET -ApiEndpoint "/enterprises/$Enterprise/rulesets" -AuthMode $AuthMode -Context $Context
     )
 
     $existingByName = @{}
@@ -520,7 +536,7 @@ function Sync-EnterpriseRulesets {
             continue
         }
 
-        Invoke-EnterprisePolicyApi -Method $method -ApiEndpoint $endpoint -Body $desired -Context $Context | Out-Null
+        Invoke-EnterprisePolicyApi -Method $method -ApiEndpoint $endpoint -Body $desired -AuthMode $AuthMode -Context $Context | Out-Null
         Write-Host "✅ Upserted enterprise ruleset '$($ruleset.name)'"
     }
 }
@@ -722,6 +738,8 @@ function Invoke-PoliciesForScope {
     foreach ($policy in $Policies) {
         $name = if ($policy.name) { $policy.name } else { [System.IO.Path]::GetFileName($policy.sourceFile) }
         $capabilityId = "$($policy.layer).$($policy.capability)"
+        $capabilityDefinition = $CapabilityCatalog[$capabilityId]
+        $authMode = if ($capabilityDefinition.authMode) { [string]$capabilityDefinition.authMode } else { 'github-app' }
 
         if ($policy.enabled -ne $true) {
             Write-Host "⏭️  Policy disabled: $name ($capabilityId)"
@@ -747,11 +765,12 @@ function Invoke-PoliciesForScope {
                     -Required $required `
                     -ValuesEditableBy $valuesEditableBy `
                     -RequireExplicitValues $requireExplicitValues `
+                    -AuthMode $authMode `
                     -WhatIf:$WhatIf
             }
             'enterprise.repo-rulesets' {
                 $rulesets = if ($policy.config.rulesets) { @($policy.config.rulesets) } else { @() }
-                Sync-EnterpriseRulesets -Enterprise $policy.config.enterprise -Rulesets $rulesets -Context $Context -WhatIf:$WhatIf
+                Sync-EnterpriseRulesets -Enterprise $policy.config.enterprise -Rulesets $rulesets -Context $Context -AuthMode $authMode -WhatIf:$WhatIf
             }
             'organization.none' {
                 Write-Host "ℹ️  Organization policy layer placeholder for $Organization"
@@ -860,7 +879,7 @@ try {
             $enterprisePolicies = Get-PolicyDocumentsFromPaths -Paths $enterprisePolicyPaths -CapabilityCatalog $capabilityCatalog -Layer 'enterprise'
             Write-Host "Enterprise policies loaded: $($enterprisePolicies.Count)"
 
-            Invoke-PoliciesForScope -Policies $enterprisePolicies -FileSets $fileSets -Context $rootContext -Enterprise $policyEnterprise -TempPath $tempPath -WhatIf:$WhatIf
+            Invoke-PoliciesForScope -Policies $enterprisePolicies -FileSets $fileSets -CapabilityCatalog $capabilityCatalog -Context $rootContext -Enterprise $policyEnterprise -TempPath $tempPath -WhatIf:$WhatIf
         }
 
         LogGroup '🏢➡️🏬 Organization and repository layers' {
@@ -876,7 +895,7 @@ try {
                     $orgPolicyPaths = Resolve-PolicyLayerPaths -PolicyRoot $policyRoot -Enterprise $policyEnterprise -Layer 'organization' -Organization $org
                     $orgPolicies = Get-PolicyDocumentsFromPaths -Paths $orgPolicyPaths -CapabilityCatalog $capabilityCatalog -Layer 'organization'
                     Write-Host "Organization policies loaded: $($orgPolicies.Count)"
-                    Invoke-PoliciesForScope -Policies $orgPolicies -FileSets $fileSets -Context $orgContext -Enterprise $policyEnterprise -Organization $org -TempPath $tempPath -WhatIf:$WhatIf
+                    Invoke-PoliciesForScope -Policies $orgPolicies -FileSets $fileSets -CapabilityCatalog $capabilityCatalog -Context $orgContext -Enterprise $policyEnterprise -Organization $org -TempPath $tempPath -WhatIf:$WhatIf
                 }
 
                 LogGroup "📦 Repositories in $org" {
@@ -889,7 +908,7 @@ try {
                         $repoPolicyPaths = Resolve-PolicyLayerPaths -PolicyRoot $policyRoot -Enterprise $policyEnterprise -Layer 'repository' -Organization $org -Repository $repo.Name
                         $repoPolicies = Get-PolicyDocumentsFromPaths -Paths $repoPolicyPaths -CapabilityCatalog $capabilityCatalog -Layer 'repository'
                         Write-Host "Repository policies loaded: $($repoPolicies.Count)"
-                        Invoke-PoliciesForScope -Policies $repoPolicies -FileSets $fileSets -Context $orgContext -Enterprise $policyEnterprise -Organization $org -Repository $repo -TempPath $tempPath -WhatIf:$WhatIf
+                        Invoke-PoliciesForScope -Policies $repoPolicies -FileSets $fileSets -CapabilityCatalog $capabilityCatalog -Context $orgContext -Enterprise $policyEnterprise -Organization $org -Repository $repo -TempPath $tempPath -WhatIf:$WhatIf
                     }
                 }
             }

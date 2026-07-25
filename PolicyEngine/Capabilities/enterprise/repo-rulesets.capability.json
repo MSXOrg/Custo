@@ -3,7 +3,7 @@
   "name": "Enterprise repository rulesets",
   "layer": "enterprise",
   "capability": "repo-rulesets",
-  "authPreference": "github-app-first-fallback-enterprise-pat",
+  "authMode": "enterprise-pat",
   "description": "Maintains enterprise-level repository rulesets.",
   "configSchema": {
     "required": ["enterprise", "rulesets"],

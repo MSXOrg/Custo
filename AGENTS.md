@@ -26,7 +26,7 @@ cannot run against real repositories until an operator completes these steps:
    equivalent app with `contents:write`, `pull_requests:write`, and
    `repository_custom_properties:read` on target repositories, plus enterprise custom-properties
    write/admin permission if enterprise schema sync is enabled.
-   If enterprise rulesets/custom-properties must be managed via PAT, also add
+   For capabilities configured with `authMode: enterprise-pat`, also add
    `CUSTO_ENTERPRISE_PAT` and grant it enterprise-admin scope.
 2. **Confirm app installation scope.** Verify the app is installed on the `PSModule` organization
    with access to the module repositories that should receive `AGENTS.md`

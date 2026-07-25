@@ -76,9 +76,10 @@ Additional file sets and rollout targets are added incrementally after this MVP 
 
 ## Required secrets
 
-The sync workflow authenticates as a GitHub App. Enterprise policy API calls are attempted with
-the GitHub App token first; when those calls are unavailable for GitHub Apps, Custo falls back to
-`CUSTO_ENTERPRISE_PAT` if present.
+The sync workflow authenticates as a GitHub App. Enterprise policy capabilities choose auth
+explicitly via `PolicyEngine/Capabilities`:
+- `authMode: github-app` uses the GitHub App installation token.
+- `authMode: enterprise-pat` uses `CUSTO_ENTERPRISE_PAT` for endpoints requiring enterprise PAT scope.
 
 For repository sync plus enterprise policy maintenance, configure:
 
@@ -91,7 +92,7 @@ Configure these repository secrets before enabling the scheduled sync:
 
 - `CUSTO_BOT_CLIENT_ID`
 - `CUSTO_BOT_PRIVATE_KEY`
-- `CUSTO_ENTERPRISE_PAT` (optional fallback PAT for enterprise policy endpoints, e.g. enterprise rulesets, with `admin:enterprise`)
+- `CUSTO_ENTERPRISE_PAT` (required for any capability configured with `authMode: enterprise-pat`, e.g. enterprise rulesets, with `admin:enterprise`)
 
 Default enterprise policy configs live at:
 
