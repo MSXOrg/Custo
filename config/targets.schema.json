@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Custo target discovery",
+  "description": "Repository discovery scope and policy engine paths for Sync Managed Files.",
+  "type": "object",
+  "required": ["scope"],
+  "properties": {
+    "scope": {
+      "type": "string",
+      "enum": ["all-access", "organizations"],
+      "description": "all-access discovers all repositories visible to the current app installation token; organizations restricts discovery to listed organizations."
+    },
+    "organizations": {
+      "type": "array",
+      "description": "GitHub organization logins to scan when scope is organizations.",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "policy": {
+      "type": "object",
+      "description": "Policy engine folder mapping and enterprise selection.",
+      "properties": {
+        "rootPath": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Relative or absolute root path that contains Capabilities/ and Policies/."
+        },
+        "enterprise": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Enterprise key used under Policies/{enterprise}/."
+        }
+      },
+      "required": ["enterprise"],
+      "additionalProperties": false
+    }
+  }, 
+  "allOf": [
+    {
+      "if": {
+        "properties": { "scope": { "const": "organizations" } }
+      },
+      "then": {
+        "required": ["organizations"],
+        "properties": {
+          "organizations": {
+            "minItems": 1
+          }
+        }
+      }
+    }
+  ],
+  "additionalProperties": false
+}

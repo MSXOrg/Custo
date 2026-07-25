@@ -1,0 +1,43 @@
+{
+  "version": "1.0",
+  "name": "Enterprise repository custom-property schema",
+  "layer": "enterprise",
+  "capability": "repo-custom-property",
+  "authMode": "github-app",
+  "description": "Maintains enterprise-level repository custom-property definitions and allowed values.",
+  "configSchema": {
+    "required": ["enterprise"],
+    "properties": {
+      "enterprise": {
+        "type": "string",
+        "description": "Enterprise slug to maintain property definitions on."
+      },
+      "typePropertyName": {
+        "type": "string",
+        "default": "Type",
+        "description": "Repository type property name."
+      },
+      "subscriptionPropertyName": {
+        "type": "string",
+        "default": "SubscribeTo",
+        "description": "Managed file-subscription property name."
+      },
+      "required": {
+        "type": "boolean",
+        "default": false,
+        "description": "Whether repositories must explicitly set these property values."
+      },
+      "valuesEditableBy": {
+        "type": "string",
+        "enum": ["org_actors", "org_and_repo_actors", null],
+        "default": "org_actors",
+        "description": "Who can edit property values."
+      },
+      "requireExplicitValues": {
+        "type": "boolean",
+        "default": false,
+        "description": "Whether setting property values is mandatory."
+      }
+    }
+  }
+}

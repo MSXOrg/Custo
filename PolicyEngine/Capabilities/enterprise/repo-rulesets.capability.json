@@ -1,0 +1,21 @@
+{
+  "version": "1.0",
+  "name": "Enterprise repository rulesets",
+  "layer": "enterprise",
+  "capability": "repo-rulesets",
+  "authMode": "enterprise-pat",
+  "description": "Maintains enterprise-level repository rulesets.",
+  "configSchema": {
+    "required": ["enterprise", "rulesets"],
+    "properties": {
+      "enterprise": {
+        "type": "string",
+        "description": "Enterprise slug to maintain rulesets on."
+      },
+      "rulesets": {
+        "type": "array",
+        "description": "Ruleset definitions mapped directly to GitHub enterprise ruleset payloads."
+      }
+    }
+  }
+}
