@@ -244,14 +244,95 @@ function Resolve-PolicyLayerPaths {
     return $paths
 }
 
-function ConvertTo-NormalizedJson {
+function ConvertTo-CanonicalObject {
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory)]
         $InputObject
     )
 
-    return ($InputObject | ConvertTo-Json -Depth 50)
+    if ($null -eq $InputObject) { return $null }
+
+    if ($InputObject -is [string] -or $InputObject -is [ValueType]) {
+        return $InputObject
+    }
+
+    if ($InputObject -is [System.Collections.IDictionary]) {
+        $ordered = [ordered]@{}
+        foreach ($key in ($InputObject.Keys | Sort-Object)) {
+            $ordered[[string]$key] = ConvertTo-CanonicalObject -InputObject $InputObject[$key]
+        }
+        return $ordered
+    }
+
+    if ($InputObject -is [System.Management.Automation.PSCustomObject]) {
+        $ordered = [ordered]@{}
+        foreach ($prop in ($InputObject.PSObject.Properties.Name | Sort-Object)) {
+            $ordered[$prop] = ConvertTo-CanonicalObject -InputObject $InputObject.$prop
+        }
+        return $ordered
+    }
+
+    if ($InputObject -is [System.Collections.IEnumerable]) {
+        $list = @()
+        foreach ($item in $InputObject) {
+            $list += , (ConvertTo-CanonicalObject -InputObject $item)
+        }
+        return , $list
+    }
+
+    return $InputObject
+}
+
+function Test-CanonicalSubset {
+    <#
+        Returns $true when every value declared in $Subset is present and equal in
+        $Superset. Both inputs must already be canonicalized. A $null desired value is
+        satisfied when the key is absent or already null, so server-added fields never
+        register as drift.
+    #>
+    [CmdletBinding()]
+    param(
+        $Superset,
+        $Subset
+    )
+
+    if ($Subset -is [System.Collections.IDictionary]) {
+        if (-not ($Superset -is [System.Collections.IDictionary])) { return $false }
+        foreach ($key in $Subset.Keys) {
+            $desiredValue = $Subset[$key]
+            $hasKey = $Superset.Contains($key)
+            $currentValue = if ($hasKey) { $Superset[$key] } else { $null }
+
+            if ($null -eq $desiredValue) {
+                if ($hasKey -and $null -ne $currentValue) { return $false }
+                continue
+            }
+
+            if (-not $hasKey) { return $false }
+            if (-not (Test-CanonicalSubset -Superset $currentValue -Subset $desiredValue)) { return $false }
+        }
+        return $true
+    }
+
+    if ($Subset -is [array]) {
+        if (-not ($Superset -is [array])) { return $false }
+        if ($Superset.Count -ne $Subset.Count) { return $false }
+        for ($i = 0; $i -lt $Subset.Count; $i++) {
+            if (-not (Test-CanonicalSubset -Superset $Superset[$i] -Subset $Subset[$i])) { return $false }
+        }
+        return $true
+    }
+
+    return ($Superset -eq $Subset)
+}
+
+function ConvertTo-NormalizedJson {
+    [CmdletBinding()]
+    param(
+        $InputObject
+    )
+
+    return (ConvertTo-CanonicalObject -InputObject $InputObject | ConvertTo-Json -Depth 50)
 }
 
 function Write-ConfigDiff {
@@ -264,17 +345,17 @@ function Write-ConfigDiff {
         $Desired
     )
 
-    $currentJson = ConvertTo-NormalizedJson -InputObject $Current
-    $desiredJson = ConvertTo-NormalizedJson -InputObject $Desired
+    $canonicalCurrent = ConvertTo-CanonicalObject -InputObject $Current
+    $canonicalDesired = ConvertTo-CanonicalObject -InputObject $Desired
 
-    if ($currentJson -eq $desiredJson) {
+    if (Test-CanonicalSubset -Superset $canonicalCurrent -Subset $canonicalDesired) {
         Write-Host "✅ $Title already matches desired state"
         return $false
     }
 
-    Write-Host "🔎 Diff for $Title"
-    $currentLines = $currentJson -split "`r?`n"
-    $desiredLines = $desiredJson -split "`r?`n"
+    Write-Host "🔎 Diff for $Title (< current / > desired)"
+    $currentLines = ($canonicalCurrent | ConvertTo-Json -Depth 50) -split "`r?`n"
+    $desiredLines = ($canonicalDesired | ConvertTo-Json -Depth 50) -split "`r?`n"
     $diff = Compare-Object -ReferenceObject $currentLines -DifferenceObject $desiredLines
     foreach ($line in $diff) {
         Write-Host "   $($line.SideIndicator) $($line.InputObject)"
